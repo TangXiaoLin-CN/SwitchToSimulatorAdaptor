@@ -11,4 +11,14 @@
       <PackageReference Include="PacketDotNet" Version="1.4.8" />
     </ItemGroup>
 
+    <!-- 复制 ENet DLL 到输出目录 -->
+    <!-- 优先级：1. 项目根目录的 enet.dll（我们编译的） 2. enet_build 目录 -->
+    <ItemGroup>
+        <!-- 优先使用项目根目录的 DLL（我们编译的版本） -->
+        <None Include=".\enet.dll" Condition="Exists('.\enet.dll')">
+            <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+            <Link>enet.dll</Link>
+        </None>
+    </ItemGroup>
+    
 </Project>
