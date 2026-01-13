@@ -147,44 +147,44 @@ public class EdenRoomMember : IDisposable
                 
                 timeout -= 5;
             }
+        }
+        
+        if (timeout <= 0)
+        {
+            Logger.Instance?.LogInfo("Connection timeout expired");
+        }
 
-            if (timeout <= 0)
-            {
-                Logger.Instance?.LogInfo("Connection timeout expired");
-            }
-
-            if (connected)
-            {
-                _nickname = nickname;
-                Logger.Instance?.LogInfo("Starting member loop and sending join request");
-                StartLoop();
+        if (connected)
+        {
+            _nickname = nickname;
+            Logger.Instance?.LogInfo("Starting member loop and sending join request");
+            StartLoop();
                 
-                // 等待一小段时间确保连接稳定
-                Thread.Sleep(100);
+            // 等待一小段时间确保连接稳定
+            Thread.Sleep(100);
 
-                SendJoinRequest(nickname, preferredFakeIp, password, token);
-                SendGameInfo(_currentGameInfo);
-            }
-            else
+            SendJoinRequest(nickname, preferredFakeIp, password, token);
+            SendGameInfo(_currentGameInfo);
+        }
+        else
+        {
+            Logger.Instance?.LogInfo($"Connection failed. Disconnected: {disconnected}, Timeout:{timeout < 0}");
+            if (_serverInitialized && _client != null && _server != IntPtr.Zero)
             {
-                Logger.Instance?.LogInfo($"Connection failed. Disconnected: {disconnected}, Timeout:{timeout < 0}");
-                if (_serverInitialized && _client != null && _server != IntPtr.Zero)
+                try
                 {
-                    try
-                    {
-                        NativeENet.enet_peer_disconnect_now(_server, 0);
-                        _client.Flush();
-                    }
-                    catch (Exception e)
-                    {
-                        Logger.Instance?.LogError($"Error while disconnecting: {e.Message}");
-                    }
+                    NativeENet.enet_peer_disconnect_now(_server, 0);
+                    _client.Flush();
                 }
-
-                _serverInitialized = false;
-                SetState(State.Idle);
-                ErrorOccurred?.Invoke(disconnected ? Error.LostConnection : Error.CouldNotConnect);
+                catch (Exception e)
+                {
+                    Logger.Instance?.LogError($"Error while disconnecting: {e.Message}");
+                }
             }
+
+            _serverInitialized = false;
+            SetState(State.Idle);
+            ErrorOccurred?.Invoke(disconnected ? Error.LostConnection : Error.CouldNotConnect);
         }
     }
 

@@ -16,6 +16,38 @@ public class NativeENetHost : IDisposable
     {
         _host = host;
     }
+
+    /// <summary>
+    /// 初始化原生 ENet 1.3 （与 Eden 使用相同的版本）
+    /// </summary>
+    public static bool InitializeNativeENet()
+    {
+        try
+        {
+            int result = NativeENet.enet_initialize();
+            if (result != 0)
+            {
+                Logger.Instance?.LogError($"Failed to initialize ENet: {result} \n 请确保 enet.dll 文件在应用程序目录中");
+                return false;
+            }
+        }
+        catch (DllNotFoundException e)
+        {
+            Logger.Instance?.LogError($"Failed to load ENet library: {e.Message} \n 请确保 enet.dll 文件在应用程序目录中");
+            return false;
+        }
+        catch (EntryPointNotFoundException e)
+        {
+            Logger.Instance?.LogError($"Failed to find entry point: {e.Message} \n 请确保 enet.dll 文件在应用程序目录中");
+            return false;
+        }
+        catch (Exception e)
+        {
+            Logger.Instance?.LogError($"Failed to initialize ENet: {e.Message}");
+        }
+
+        return true;
+    }
     
     /// <summary>
     /// 创建服务器主机
@@ -60,11 +92,11 @@ public class NativeENetHost : IDisposable
     public static NativeENetHost CreateClient(int channelLimit)
     {
         IntPtr hostPtr = NativeENet.enet_host_create(
-        IntPtr.Zero,
-        new IntPtr(1),
+        IntPtr.Zero,                    // address = null (ENET_HOST_ANY)
+        new IntPtr(1),               // peerCount = 1
         new IntPtr(channelLimit),
-        0,
-        0
+        0,                    // incomingBandwidth (0 = unlimited)
+        0                     // outgoingBandwidth (0 = unlimited)
             );
 
         if (hostPtr == IntPtr.Zero)
@@ -215,6 +247,8 @@ public class NativeENetHost : IDisposable
                 NativeENet.enet_host_destroy(_host);
                 _host = IntPtr.Zero;
             }
+            // 清理原生 ENet
+            NativeENet.enet_deinitialize();
             _disposed = true;
         }
     }
