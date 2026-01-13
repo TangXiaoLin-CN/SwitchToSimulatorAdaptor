@@ -92,11 +92,11 @@ public class EdenRoomMember : IDisposable
         bool connected = false;
         bool disconnected = false;
         int timeout = AppSetting.ConnectionTimeoutMs;
-        Logger.Instance.LogInfo($"Waiting for connection (timeout: {timeout} ms...");
+        Logger.Instance?.LogInfo($"Waiting for connection (timeout: {timeout} ms...");
 
         while (timeout > 0 && _client != null)
         {
-            if (_client.CheckEvents(out NativeENetEvent netEvent))
+            if (_client.CheckEvents(out var netEvent))
             {
                 Logger.Instance?.LogInfo($"Received event: {netEvent.Type}");
 
@@ -119,7 +119,7 @@ public class EdenRoomMember : IDisposable
             else
             {
                 // No Event, wait a bit
-                if (!_client.Service(out NativeENetEvent serviceEvent, 5))
+                if (!_client.Service(out var serviceEvent, 5))
                 {
                     timeout -= 5;
                     continue;

@@ -15,8 +15,7 @@ namespace SwitchToSimulatorAdaptor.Utils
         private static Logger? _instance;
         private static readonly object _lock = new object();
         
-        // private readonly string _logFilePath;
-        private readonly StreamWriter? _logWriter;
+        private StreamWriter? _logWriter;
         private readonly BlockingCollection<LogEntry> _logQueue;
         private readonly Thread _writeThread;
         private readonly CancellationTokenSource _cts; // 这个类是用于干什么呢？  
@@ -37,10 +36,6 @@ namespace SwitchToSimulatorAdaptor.Utils
         // UI 显示事件
         public event Action<string>? LogMessage;
         public event Action<string, LogLevel>? LogMessageWithLevel;
-        
-        // 批量写入配置
-        // private const int BatchSize = 50;           // 每批最多写入条数
-        // private const int FlushIntervalMs = 100;    // 强制刷新间隔（毫秒）
         
         // 单例
         public static Logger? Instance
@@ -79,51 +74,8 @@ namespace SwitchToSimulatorAdaptor.Utils
             _logQueue = new BlockingCollection<LogEntry>(10000); // 队列大小
             _cts = new CancellationTokenSource();
             
-            // 从 AppConfigs 中加载日志级别配置
-            var config = AppSetting.Instance;
-            _recordDebug = config.RecordDebug;
-            _recordInfo = config.RecordInfo;
-            _recordWarning = config.RecordWarning;
-            _recordError = config.RecordError;
-            _displayDebug = config.DisplayDebug;
-            _displayInfo = config.DisplayInfo;
-            _displayWarning = config.DisplayWarning;
-            _displayError = config.DisplayError;
-            
-            // // 日志文件路径：应用程序目录下的 logs 文件夹
-            // string appDir = AppDomain.CurrentDomain.BaseDirectory;
-            // string logsDir = Path.Combine(appDir, "logs");
-            
-            if (!Directory.Exists(AppSetting.LogFileDic))
-            {
-                Directory.CreateDirectory(AppSetting.LogFileDic);
-            }
-            
-            // 轮转日志文件
-            // RotateLogFiles(logsDir);
-            RotateLogFiles();
-
-            // _logFilePath = Path.Combine(logsDir, "SwitchToSimulatorAdaptor.log");
-
-            try
-            {
-                // 创建日志文件 （不使用 AutoFlush，由写入线程控制刷新） // 什么是 AutoFlush？ 是一个参数吗？
-                // _logWriter = new StreamingWriter(_logFilePath, false, Encoding.UTF8)
-                _logWriter = new StreamWriter(AppSetting.LogFilePath, false, Encoding.UTF8)
-                {
-                    AutoFlush = false
-                };
-                
-                // 写入日志头
-                _logWriter.WriteLine("========================================");
-                _logWriter.WriteLine($"SwitchToSimulatorAdaptor 日志 - {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
-                _logWriter.WriteLine("========================================");
-                _logWriter.Flush();
-            }
-            catch (Exception e)
-            {
-                System.Diagnostics.Debug.WriteLine($"[Logger] 无法创建日志文件: {e.Message}"); // 这个System.Diagnostics.Debug.WriteLine是什么？ 是系统提供的日志吗？
-            }
+            LoadSavedConfigs();
+            CreateLogFile();
             
             // 启动后台写入线程
             _writeThread = new Thread(WriterThreadLoop)
@@ -165,22 +117,7 @@ namespace SwitchToSimulatorAdaptor.Utils
                     // 写入批量日志
                     if (batch.Count > 0 && _logWriter != null)
                     {
-                        // foreach (var item in batch)
-                        // {
-                        //     string levelStr = item.Level switch
-                        //     {
-                        //         LogLevel.Debug => "DEBUG",
-                        //         LogLevel.Info => "INFO",
-                        //         LogLevel.Warning => "WARNING",
-                        //         LogLevel.Error => "ERROR",
-                        //         _ => "INFO"
-                        //     };
-                        //     string logLine = $"[{item.Timestamp:yyyy-MM-dd HH:mm:ss.fff}] [{levelStr}] {item.Message}";
-                        //     _logWriter.WriteLine(logLine);
-                        // }
-                        
                         WriteLog(batch);
-                        
                         batch.Clear();
                         lastFlushTime = DateTime.UtcNow;
                     }
@@ -215,20 +152,6 @@ namespace SwitchToSimulatorAdaptor.Utils
 
                 if (batch.Count > 0 && _logWriter != null)
                 {
-                    // foreach (var item in batch)
-                    // {
-                    //     string levelStr = item.Level switch
-                    //     {
-                    //         LogLevel.Debug => "DEBUG",
-                    //         LogLevel.Info => "INFO",
-                    //         LogLevel.Warning => "WARNING",
-                    //         LogLevel.Error => "ERROR",
-                    //         _ => "INFO"
-                    //     };
-                    //     string logLine = $"[{item.Timestamp:yyyy-MM-dd HH:mm:ss.fff}] [{levelStr}] {item.Message}";
-                    //     _logWriter.WriteLine(logLine);
-                    // }
-                    
                     WriteLog(batch);
                 }
                 
@@ -240,6 +163,20 @@ namespace SwitchToSimulatorAdaptor.Utils
             catch { }
         }
 
+        private void LoadSavedConfigs()
+        {
+            // 从 AppConfigs 中加载日志级别配置
+            var config = AppSetting.Instance;
+            _recordDebug = config.RecordDebug;
+            _recordInfo = config.RecordInfo;
+            _recordWarning = config.RecordWarning;
+            _recordError = config.RecordError;
+            _displayDebug = config.DisplayDebug;
+            _displayInfo = config.DisplayInfo;
+            _displayWarning = config.DisplayWarning;
+            _displayError = config.DisplayError;
+        }
+        
         private void WriteLog(List<LogEntry> batch)
         {
             try
@@ -268,6 +205,36 @@ namespace SwitchToSimulatorAdaptor.Utils
             }
         }
 
+        private void CreateLogFile()
+        {
+            if (!Directory.Exists(AppSetting.LogFileDic))
+            {
+                Directory.CreateDirectory(AppSetting.LogFileDic);
+            }
+            
+            // 轮转日志文件
+            RotateLogFiles();
+            
+            try
+            {
+                // 创建日志文件 （不使用 AutoFlush，由写入线程控制刷新） // Q:什么是 AutoFlush？ 是一个参数吗？
+                _logWriter = new StreamWriter(AppSetting.LogFilePath, false, Encoding.UTF8)
+                {
+                    AutoFlush = false
+                };
+                
+                // 写入日志头
+                _logWriter.WriteLine("========================================");
+                _logWriter.WriteLine($"SwitchToSimulatorAdaptor 日志 - {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+                _logWriter.WriteLine("========================================");
+                _logWriter.Flush();
+            }
+            catch (Exception e)
+            {
+                System.Diagnostics.Debug.WriteLine($"[Logger] 无法创建日志文件: {e.Message}"); // 这个System.Diagnostics.Debug.WriteLine是什么？ 是系统提供的日志吗？
+            }
+        }
+
         /// <summary>
         /// 轮转日志文件
         /// </summary>
@@ -276,18 +243,6 @@ namespace SwitchToSimulatorAdaptor.Utils
         {
             try
             {
-                // string currentLogPath = Path.Combine(logsDir, "edenldnbridge.log");
-                // string oldLogPath = Path.Combine(logsDir, "edenldnbridge_old.log");
-                //
-                // if (File.Exists(currentLogPath))
-                // {
-                //     if (File.Exists(oldLogPath))
-                //     {
-                //         try { File.Delete(oldLogPath); } catch {}
-                //     }
-                //     try { File.Move(currentLogPath, oldLogPath); } catch {}
-                // }
-                
                 if (File.Exists(AppSetting.LogFilePath))
                 {
                     if (File.Exists(AppSetting.OldLogFilePath))
@@ -304,31 +259,12 @@ namespace SwitchToSimulatorAdaptor.Utils
             }
         }
 
-        public void Log(string message, LogLevel level = LogLevel.Info)
+        private void Log(string message, LogLevel level = LogLevel.Info)
         {
             if (_disposed) return;
             
-            // 检查是否需要记录
-            bool shouldRecord = level switch
-            {
-                LogLevel.Debug => _recordDebug,
-                LogLevel.Info => _recordInfo,
-                LogLevel.Warning => _recordWarning,
-                LogLevel.Error => _recordError,
-                _ => true
-            };
-            
-            // 检查是否需要显示
-            bool shouldDisplay = level switch
-            {
-                LogLevel.Debug => _displayDebug,
-                LogLevel.Info => _displayInfo,
-                LogLevel.Warning => _displayWarning,
-                LogLevel.Error => _displayError,
-                _ => true
-            };
-            
-            // 如果既不记录也不显示，直接返回
+            bool shouldRecord = IsRecordLevelEnabled(level);
+            bool shouldDisplay = IsDisplayLevelEnabled(level);
             if (!shouldRecord && !shouldDisplay) return;
 
             var timestamp = DateTime.Now;
@@ -438,7 +374,7 @@ namespace SwitchToSimulatorAdaptor.Utils
         /// </summary>
         /// <param name="level"></param>
         /// <returns></returns>
-        public bool IsDisplayLevelEnable(LogLevel level)
+        public bool IsDisplayLevelEnabled(LogLevel level)
         {
             return level switch
             {
