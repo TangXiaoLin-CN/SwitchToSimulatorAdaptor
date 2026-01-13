@@ -9,6 +9,7 @@
 
     <ItemGroup>
       <PackageReference Include="PacketDotNet" Version="1.4.8" />
+      <PackageReference Include="SharpPcap" Version="6.3.1" />
     </ItemGroup>
 
     <!-- 复制 ENet DLL 到输出目录 -->
@@ -19,6 +20,9 @@
             <CopyToOutputDirectory>Always</CopyToOutputDirectory>
             <Link>enet.dll</Link>
         </None>
+    </ItemGroup>
+    <ItemGroup>
+      <Folder Include="SwitchLdn\" />
     </ItemGroup>
     
 </Project>

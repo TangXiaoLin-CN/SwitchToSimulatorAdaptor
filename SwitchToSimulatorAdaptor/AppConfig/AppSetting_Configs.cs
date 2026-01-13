@@ -33,5 +33,9 @@ public partial class AppSetting
     public const int ConnectionTimeoutMs = 5000;
     public const int NumChannels = 1;
     
-    
+    // --------------- SharpPcap ---------------
+    public const string TargetDeviceFriendlyName = "以太网";
+    public const int ReadTimeOut = 1000;
+    public const string BPFFilter = "udp port 11452";
+
 }
