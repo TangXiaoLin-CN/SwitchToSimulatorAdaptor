@@ -2,13 +2,17 @@ namespace SwitchToSimulatorAdaptor;
 
 public partial class AppSetting
 {
+    // ---------------   公共   --------------
+    private const string EdenRoomNicknamePrefix = "RealSwitchUser_";
+    public static string EdenRoomNickname = $"{EdenRoomNicknamePrefix}{DateTime.Now.Ticks % 10000}";
+    
     // --------------- 配置文件 ---------------
     public const string ConfigFileName = "config.json";
     public static string ConfigFilePath { get; } = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, ConfigFileName);
     
     // --------------- 日志配置 ---------------
-    public const string LogFileName = "SwitchToSimulatorAdaptor_Log.log";
-    public const string OldLogFileName = "SwitchToSimulatorAdaptor_Log_Old.log";
+    public const string LogFileName = "SwitchToSimulatorAdaptor.log";
+    public const string OldLogFileName = "SwitchToSimulatorAdaptor_Old.log";
     public static string LogFileDic { get; } = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "logs"); // 日志文件所在文件夹：应用程序目录下的 logs 文件夹
     public static string LogFilePath { get; } = Path.Combine(LogFileDic, LogFileName);
     public static string OldLogFilePath { get; } = Path.Combine(LogFileDic, OldLogFileName);

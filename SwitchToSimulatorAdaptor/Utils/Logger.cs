@@ -96,12 +96,12 @@ namespace SwitchToSimulatorAdaptor.Utils
             
             if (!Directory.Exists(AppSetting.LogFileDic))
             {
-                Directory.CreateDirectory(AppSetting.LogFilePath);
+                Directory.CreateDirectory(AppSetting.LogFileDic);
             }
             
             // 轮转日志文件
             // RotateLogFiles(logsDir);
-            RotateLogFiles(AppSetting.LogFileDic);
+            RotateLogFiles();
 
             // _logFilePath = Path.Combine(logsDir, "SwitchToSimulatorAdaptor.log");
 
@@ -271,9 +271,8 @@ namespace SwitchToSimulatorAdaptor.Utils
         /// <summary>
         /// 轮转日志文件
         /// </summary>
-        /// <param name="logsDir"></param>
         // private void RotateLogFiles(string logsDir)
-        private void RotateLogFiles(string logsDir)
+        private void RotateLogFiles()
         {
             try
             {
