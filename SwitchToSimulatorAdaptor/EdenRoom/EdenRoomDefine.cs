@@ -1,3 +1,5 @@
+using SwitchToSimulatorAdaptor.Common;
+
 namespace SwitchToSimulatorAdaptor.EdenRoom;
 
 /// <summary>
@@ -34,17 +36,6 @@ public struct EdenLDNPacket
     public byte[] Data;
 }
 
-public struct IPv4Address
-{
-    public byte A, B, C, D;
-
-    public IPv4Address(byte a, byte b, byte c, byte d)
-    {
-        A = a; B = b; C = c ; D = d;
-    }
-
-    public override string ToString() => $"{A}.{B}.{C}.{D}";
-}
 
 public struct GameInfo
 {

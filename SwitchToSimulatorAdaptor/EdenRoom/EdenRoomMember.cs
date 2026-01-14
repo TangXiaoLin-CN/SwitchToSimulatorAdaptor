@@ -1,3 +1,4 @@
+using SwitchToSimulatorAdaptor.Common;
 using SwitchToSimulatorAdaptor.Utils;
 
 namespace SwitchToSimulatorAdaptor.EdenRoom;

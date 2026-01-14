@@ -1,4 +1,5 @@
 using System.Text;
+using SwitchToSimulatorAdaptor.Common;
 using SwitchToSimulatorAdaptor.Utils;
 
 namespace SwitchToSimulatorAdaptor.EdenRoom;

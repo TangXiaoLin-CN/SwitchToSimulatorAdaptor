@@ -1,4 +1,5 @@
 using System.Net.Sockets;
+using SwitchToSimulatorAdaptor.Common;
 
 namespace SwitchToSimulatorAdaptor.EdenRoom;
 
