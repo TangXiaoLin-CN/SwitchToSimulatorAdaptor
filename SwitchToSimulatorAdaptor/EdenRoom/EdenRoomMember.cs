@@ -164,7 +164,7 @@ public class EdenRoomMember : IDisposable
             // 等待一小段时间确保连接稳定
             Thread.Sleep(100);
 
-            SendJoinRequest(nickname, preferredFakeIp, password, token);
+            SendJoinRequest(nickname, new IPv4Address([192, 168, 1, 7]), password, token);
             SendGameInfo(_currentGameInfo);
         }
         else
@@ -366,42 +366,32 @@ public class EdenRoomMember : IDisposable
         {
             if (_client.CheckEvents(out NativeENetEvent netEvent)) // Q: 这里为什么下上内容是一样的？
             {
-                switch (netEvent.Type)
-                {
-                    case NativeENet.ENetEventType.ENET_EVENT_TYPE_RECEIVE:
-                        HandlePacket(netEvent);
-                        // 注意：原生 ENet 的数据包会在事件处理后自动管理
-                        break;
-                    case NativeENet.ENetEventType.ENET_EVENT_TYPE_DISCONNECT:
-                        SetState(State.Idle);
-                        ErrorOccurred?.Invoke(Error.LostConnection);
-                        return;
-                    case NativeENet.ENetEventType.ENET_EVENT_TYPE_CONNECT:
-                    case NativeENet.ENetEventType.ENET_EVENT_TYPE_NONE:
-                    case NativeENet.ENetEventType.ENET_EVENT_TYPE_TIMEOUT:
-                        break;
-                }
+                HandleNativeENetEvent(netEvent);
             }
             else
             {
-                if (!_client.Service(out NativeENetEvent serviceEvent, 5))
-                    continue;
+                if (!_client.Service(out NativeENetEvent serviceEvent, 5)) continue;
 
-                switch (netEvent.Type)
-                {
-                    case NativeENet.ENetEventType.ENET_EVENT_TYPE_RECEIVE:
-                        HandlePacket(netEvent);
-                        break;
-                    case NativeENet.ENetEventType.ENET_EVENT_TYPE_DISCONNECT:
-                        SetState(State.Idle);
-                        ErrorOccurred?.Invoke(Error.LostConnection);
-                        return;
-                    case NativeENet.ENetEventType.ENET_EVENT_TYPE_CONNECT:
-                    case NativeENet.ENetEventType.ENET_EVENT_TYPE_NONE:
-                    case NativeENet.ENetEventType.ENET_EVENT_TYPE_TIMEOUT:
-                        break;
-                }
+                HandleNativeENetEvent(serviceEvent);
             }
+        }
+    }
+
+    private void HandleNativeENetEvent(NativeENetEvent netEvent)
+    {
+        switch (netEvent.Type)
+        {
+            case NativeENet.ENetEventType.ENET_EVENT_TYPE_RECEIVE:
+                HandlePacket(netEvent);
+                break;
+            case NativeENet.ENetEventType.ENET_EVENT_TYPE_DISCONNECT:
+                SetState(State.Idle);
+                ErrorOccurred?.Invoke(Error.LostConnection);
+                return;
+            case NativeENet.ENetEventType.ENET_EVENT_TYPE_CONNECT:
+            case NativeENet.ENetEventType.ENET_EVENT_TYPE_NONE:
+            case NativeENet.ENetEventType.ENET_EVENT_TYPE_TIMEOUT:
+                break;
         }
     }
 
