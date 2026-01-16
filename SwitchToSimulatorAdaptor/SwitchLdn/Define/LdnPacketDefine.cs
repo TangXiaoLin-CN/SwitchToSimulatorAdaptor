@@ -13,10 +13,8 @@ public enum LdnPacketType : byte
     Scan = 0, // 扫描请求
     ScanResponse = 1, // 扫描响应
     Connect = 2, // 连接请求
-    ConnectResponse = 3, // 连接响应
+    SyncNetwork = 3, // 同步网络信息
     Disconnect = 4, // 断开连接
-    SyncNetwork = 5, // 同步网络信息
-    DisconnectClient = 6, // 断开客户端
 }
 
 public class LdnHeader
@@ -203,17 +201,17 @@ public struct ConnectResponseData
     public byte[] Reserved;
 }
 
-public class ConnectResponsePacket
-{
-    public ConnectResponseData Response { get; set; }
-
-    public byte[] Build()
-    {
-        var header = new LdnHeader() { Type = LdnPacketType.ConnectResponse };
-        var payload = StructHelper.StructToBytes(Response);
-        return header.ToBytes(payload);
-    }
-}
+// public class ConnectResponsePacket
+// {
+//     public ConnectResponseData Response { get; set; }
+//
+//     public byte[] Build()
+//     {
+//         var header = new LdnHeader() { Type = LdnPacketType.ConnectResponse };
+//         var payload = StructHelper.StructToBytes(Response);
+//         return header.ToBytes(payload);
+//     }
+// }
 
 public class SyncNetworkPacket
 {

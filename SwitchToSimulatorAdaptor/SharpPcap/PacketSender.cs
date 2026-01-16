@@ -15,7 +15,7 @@ namespace SwitchToSimulatorAdaptor.SharpPcap;
 /// </summary>
 public class PacketSender
 {
-    private readonly LibPcapLiveDevice _device;
+    private readonly LibPcapLiveDevice? _device;
     private readonly object _sendLock = new();
     private readonly BlockingCollection<byte[]>? _sendQueue;
     private readonly Thread _sendThread;
@@ -29,7 +29,7 @@ public class PacketSender
     public event Action<string> OnLog;
     public event Action<Exception> OnError;
 
-    public PacketSender(LibPcapLiveDevice device, bool useQueue = false)
+    public PacketSender(LibPcapLiveDevice? device, bool useQueue = false)
     {
         _device = device;
 

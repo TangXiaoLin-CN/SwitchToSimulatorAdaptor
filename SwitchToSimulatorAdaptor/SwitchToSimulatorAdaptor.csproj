@@ -11,6 +11,7 @@
       <PackageReference Include="K4os.Compression.LZ4" Version="1.3.8" />
       <PackageReference Include="PacketDotNet" Version="1.4.8" />
       <PackageReference Include="SharpPcap" Version="6.3.1" />
+      <PackageReference Include="ZstdSharp.Port" Version="0.8.7" />
     </ItemGroup>
 
     <!-- 复制 ENet DLL 到输出目录 -->

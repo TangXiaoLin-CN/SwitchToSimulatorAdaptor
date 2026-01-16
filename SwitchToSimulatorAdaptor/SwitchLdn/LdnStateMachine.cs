@@ -14,8 +14,8 @@ public class LdnStateMachine
     private readonly IPv4Address _hostIp;
 
     // 回调
-    public Action<byte[], ushort, byte[]>? SendUdpPacket; // （目标IP, 目标端口, 数据）
-    public Action<ClientSession, byte[]>? SendTcpPacket; // （会话, 数据）
+    public Action<byte[], ushort, byte[]>? SendUdpPacket;   // （目标IP, 目标端口, 数据）
+    public Action<ClientSession, byte[]>?  SendTcpPacket;   // （会话, 数据）
 
     // 事件
     public Action<ClientSession>? OnClientConnected;
@@ -107,7 +107,7 @@ public class LdnStateMachine
         if (_networkInfo.ParticipantCount >= _networkInfo.MaxParticipants)
         {
             Console.WriteLine("[LDN Host] 房间已满，拒绝连接");
-            SendConnectResponse(session, ConnectResult.RoomFull, 0);
+            // SendConnectResponse(session, ConnectResult.RoomFull, 0);
             return;
         }
 
@@ -122,11 +122,11 @@ public class LdnStateMachine
             }
         }
 
-        if (nodeId == 0)
-        {
-            SendConnectResponse(session, ConnectResult.NodeCountLimitReached, 0);
-            return;
-        }
+        // if (nodeId == 0)
+        // {
+        //     SendConnectResponse(session, ConnectResult.NodeCountLimitReached, 0);
+        //     return;
+        // }
 
         // 更新 NodeInfo
         var nodeInfo = request.NodeInfo;
@@ -148,8 +148,8 @@ public class LdnStateMachine
 
         Console.WriteLine($"[LDN Host] 客户端已连接： NodeId = {nodeId}, IP = {nodeInfo.Ip}, Name = {nodeInfo.GetUserName()}");
 
-        // 发送成功响应
-        SendConnectResponse(session, ConnectResult.Success, nodeId);
+        // // 发送成功响应
+        // SendConnectResponse(session, ConnectResult.Success, nodeId);
 
         // 广播 SyncNetwork
         BroadcastSyncNetwork();
@@ -232,20 +232,20 @@ public class LdnStateMachine
         BroadcastSyncNetwork();
     }
 
-    private void SendConnectResponse(ClientSession session, ConnectResult result, byte nodeId)
-    {
-        var response = new ConnectResponsePacket
-        {
-            Response = new ConnectResponseData
-            {
-                Result = result,
-                NodeId = nodeId,
-                Reserved = new byte[2]
-            }
-        };
-
-        SendTcpPacket?.Invoke(session, response.Build());
-    }
+    // private void SendConnectResponse(ClientSession session, ConnectResult result, byte nodeId)
+    // {
+    //     var response = new ConnectResponsePacket
+    //     {
+    //         Response = new ConnectResponseData
+    //         {
+    //             Result = result,
+    //             NodeId = nodeId,
+    //             Reserved = new byte[2]
+    //         }
+    //     };
+    //
+    //     SendTcpPacket?.Invoke(session, response.Build());
+    // }
 
     // 属性
     public LdnState State => _state;

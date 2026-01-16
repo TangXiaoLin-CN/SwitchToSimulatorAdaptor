@@ -5,6 +5,8 @@ public partial class AppSetting
     // ---------------   公共   --------------
     private const string EdenRoomNicknamePrefix = "RealSwitchUser_";
     public static string EdenRoomNickname = $"{EdenRoomNicknamePrefix}{DateTime.Now.Ticks % 10000}";
+    public const int LdnPacketPort = 11452;
+    public const int GameUdpPort = 12345;
     
     // --------------- 配置文件 ---------------
     public const string ConfigFileName = "config.json";

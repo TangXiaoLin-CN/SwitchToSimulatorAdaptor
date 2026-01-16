@@ -1,5 +1,6 @@
 using SharpPcap;
 using SharpPcap.LibPcap;
+using SwitchToSimulatorAdaptor.SwitchLdn;
 using SwitchToSimulatorAdaptor.Utils;
 
 namespace SwitchToSimulatorAdaptor.SharpPcap;
@@ -11,7 +12,24 @@ public class SharpPcapManager : IDisposable
     private PacketSender? _packetSender;
     private readonly HashSet<PacketArrivalEventHandler> _packetArrivalEventHandlers = new();
     
+    
     public bool Init()
+    {
+        if (!InitDevice()) return false;
+
+        _packetSender = new PacketSender(_liveDevice, true);
+        _packetSender.OnLog += OnPacketSenderLogEvent;
+        _packetSender.OnError += OnPacketSenderErrorEvent;
+        
+        _liveDevice?.OnPacketArrival += OnPacketArrivalEvent;
+        _liveDevice?.Open(DeviceModes.DataTransferUdp, AppSetting.ReadTimeOut);
+        _liveDevice?.Filter = AppSetting.BPFFilter;
+            
+        _initialized = true;
+        return true;
+    }
+
+    private bool InitDevice()
     {
         var devices = CaptureDeviceList.Instance;
 
@@ -26,17 +44,8 @@ public class SharpPcapManager : IDisposable
             if (device is not LibPcapLiveDevice libPcapLiveDevice) continue;
             if (!(libPcapLiveDevice.Interface?.FriendlyName ?? "").StartsWith(AppSetting.TargetDeviceFriendlyName))
                 continue;
-
-            _packetSender = new PacketSender(libPcapLiveDevice, true);
-            _packetSender.OnLog += OnPacketSenderLogEvent;
-            _packetSender.OnError += OnPacketSenderErrorEvent;
             
             _liveDevice = libPcapLiveDevice;
-            _liveDevice.OnPacketArrival += OnPacketArrivalEvent;
-            _liveDevice.Open(DeviceModes.DataTransferUdp, AppSetting.ReadTimeOut);
-            _liveDevice.Filter = AppSetting.BPFFilter;
-            
-            _initialized = true;
             return true;
         }
 
@@ -101,6 +110,8 @@ public class SharpPcapManager : IDisposable
         _liveDevice?.Close();
         _liveDevice?.Dispose();
         _liveDevice = null;
+     
+        _packetArrivalEventHandlers.Clear();
         
         _initialized = false;
     }
