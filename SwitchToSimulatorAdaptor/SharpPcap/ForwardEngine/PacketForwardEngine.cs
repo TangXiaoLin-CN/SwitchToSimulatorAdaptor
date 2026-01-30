@@ -57,6 +57,8 @@ public class PacketForwardEngine : IAsyncDisposable
         _arpCache = new ArpCache();
         _arpProxy = new ArpProxy(_arpCache);
 
+        await _capture.StartAsync(_cts.Token);
+        
         _isRunning = true;
         Logger.Instance?.LogInfo($"PacketForwardEngine started on interface: {_networkInterface}");
     }

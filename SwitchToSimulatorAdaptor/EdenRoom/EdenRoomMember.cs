@@ -164,7 +164,7 @@ public class EdenRoomMember : IDisposable
             // 等待一小段时间确保连接稳定
             Thread.Sleep(100);
 
-            SendJoinRequest(nickname, new IPv4Address([192, 168, 1, 7]), password, token);
+            SendJoinRequest(nickname, new IPv4Address([192, 168, 166, 1]), password, token);
             SendGameInfo(_currentGameInfo);
         }
         else

@@ -187,7 +187,7 @@ public class PcapCapture : IPacketCapture
         try
         {
             var macStr = string.Join(":", _macAddress.Select(b => b.ToString("X2")));
-            var filter = $"net {AppSetting.SubnetNet}/16 and not ether src {macStr}";
+            var filter = AppSetting.BPFFilter;
             
             _device.Filter = filter;
             Logger.Instance?.LogDebug($"BPF filter set: {filter}");
@@ -224,14 +224,14 @@ public class PcapCapture : IPacketCapture
 
     private static byte[] GetMacAddress(ICaptureDevice device)
     {
-        if (device is LibPcapLiveDevice libPcapDevice)
-        {
-            var mac = libPcapDevice.MacAddress;
-            if (mac != null)
-            {
-                return mac.GetAddressBytes();
-            }
-        }
+        // if (device is LibPcapLiveDevice libPcapDevice)
+        // {
+        //     var mac = libPcapDevice.MacAddress;
+        //     if (mac != null)
+        //     {
+        //         return mac.GetAddressBytes();
+        //     }
+        // }
 
         // 如果无法获取，返回一个随机 MAC
         var randomMac = new byte[6];
