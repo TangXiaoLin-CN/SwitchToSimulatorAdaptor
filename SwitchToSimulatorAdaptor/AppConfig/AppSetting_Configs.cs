@@ -40,4 +40,17 @@ public partial class AppSetting
     public const int ReadTimeOut = 1000;
     public const string BPFFilter = "udp port 11452";
 
+    
+    // --------------- ForwardEngine ---------------
+    public const int ArpCacheSize = 100;
+    public const int ArpTtlSeconds = 30;
+    public static readonly byte[] GatewayIpBytes = [192, 168, 37, 1];
+    public static readonly byte[] SubnetNetBytes = [192, 168, 0, 0];
+    public static readonly byte[] SubnetMaskBytes = [255, 255, 0, 0];
+    public static readonly byte[] BroadcastBytes = [192, 168, 255, 255];
+    
+    public const string GatewayIp = "192.168.37.1";
+    public const string SubnetNet = "192.168.0.0";
+    public const string SubnetMask = "255.255.0.0";
+    
 }
