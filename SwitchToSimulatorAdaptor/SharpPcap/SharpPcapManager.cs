@@ -12,6 +12,7 @@ public class SharpPcapManager : IDisposable
     private PacketSender? _packetSender;
     private readonly HashSet<PacketArrivalEventHandler> _packetArrivalEventHandlers = new();
     
+    public byte[] DeviceMac => _liveDevice?.MacAddress?.GetAddressBytes() ?? new byte[6];
     
     public bool Init()
     {
