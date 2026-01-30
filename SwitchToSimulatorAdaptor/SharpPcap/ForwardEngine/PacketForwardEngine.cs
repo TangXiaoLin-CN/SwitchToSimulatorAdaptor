@@ -76,6 +76,54 @@ public class PacketForwardEngine : IAsyncDisposable
         
         Logger.Instance?.LogInfo("PacketForwardEngine stopped");
     }
+
+    public async Task SendUdpAsync(byte[] srcIp, ushort srcPort, byte[] dstIp, ushort dstPort,
+        ReadOnlyMemory<byte> data)
+    {
+        if (_capture == null || _arpCache == null)
+        {
+            Logger.Instance?.LogWarning("PacketForwardEngine is not initialized");
+            return;
+        }
+        
+        Logger.Instance?.LogInfo($"SendUdp: {ByteHelper.IpToString(srcIp)}:{srcPort} -> " +
+                                 $"{ByteHelper.IpToString(dstIp)}:{dstPort} ({data.Length} bytes)");
+
+        var udpPacket = UdpPacket.BuildIPv4Packet(srcIp, srcPort, dstIp, dstPort, data.Span, ref _identification);
+
+        if (_arpCache.TryGetMac(dstIp, out var dstMac))
+        {
+            Logger.Instance?.LogDebug($"    -> Sending to known host {ByteHelper.MacToString(dstMac)}");
+            await SendEthernetAsync(dstMac, EthernetFrame.TypeIPv4, udpPacket);
+        }
+        else if (ByteHelper.IsBroadcast(dstIp, _subnetNet, _subnetMask))
+        {
+            Logger.Instance?.LogInfo("    -> Broadcasting to all known hosts");
+            foreach (var (_, mac) in _arpCache.GetAllValid())
+            {
+                await SendEthernetAsync(mac, EthernetFrame.TypeIPv4, udpPacket);
+            }
+        }
+        else
+        {
+            Logger.Instance?.LogWarning($"    -> Target MAC not found in ARP cache, " +
+                                        $"sending ARP request for {ByteHelper.IpToString(dstIp)}");
+
+            var arpRequest = ArpProxy.BuildArpRequest(_capture.MacAddress, srcIp, dstIp);
+            await _capture.SendPacketAsync(arpRequest);
+
+            await Task.Delay(100);
+            if (_arpCache.TryGetMac(dstIp, out dstMac))
+            {
+                Logger.Instance?.LogDebug($"    -> ARP resolved, sending to {ByteHelper.MacToString(dstMac)}");
+                await SendEthernetAsync(dstMac, EthernetFrame.TypeIPv4, udpPacket);
+            }
+            else
+            {
+                Logger.Instance?.LogWarning($"    -> Failed to resolve MAC address for {ByteHelper.IpToString(dstIp)}");
+            }
+        }
+    }
     
     public async Task SendTcpAsync(byte[] srcIp, ushort srcPort, byte[] dstIp, ushort dstPort,
         uint seqNum, uint ackNum, byte flags, ReadOnlyMemory<byte> payload)
