@@ -296,7 +296,8 @@ public class PacketForwardEngine : IAsyncDisposable
 
         _onTcpReceived?.Invoke(srcIp, tcp.SourcePort, dstIp, tcp.DestinationPort, tcp.Payload.ToArray(), flags);
 
-        if (_tcpForwardTarget != null)
+        // if (_tcpForwardTarget != null)
+        if (true)
         {
             await HandleTcpForwardAsync(ip, tcp, srcIp, dstIp);
         }
@@ -323,7 +324,7 @@ public class PacketForwardEngine : IAsyncDisposable
     
     private async Task HandleTcpForwardAsync(IPv4Packet ip, TcpPacket tcp, byte[] srcIp, byte[] dstIp)
     {
-        if (_tcpForwardTarget == null) return;
+        // if (_tcpForwardTarget == null) return;
 
         var key = new TcpSessionKey(srcIp, tcp.SourcePort, dstIp, tcp.DestinationPort);
         
@@ -335,7 +336,7 @@ public class PacketForwardEngine : IAsyncDisposable
             var session = new TcpForwardSession(
                 srcIp, tcp.SourcePort,
                 dstIp, tcp.DestinationPort,
-                _tcpForwardTarget,
+                // _tcpForwardTarget,
                 SendTcpPacketAsync);
 
             _tcpSessions[key] = session;

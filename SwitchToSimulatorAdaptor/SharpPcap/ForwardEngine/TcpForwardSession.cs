@@ -75,11 +75,11 @@ public class TcpForwardSession : IDisposable
     private readonly ushort _clientPort;
     private readonly byte[] _serverIp;
     private readonly ushort _serverPort;
-    private readonly IPEndPoint _targetEndpoint;
+    // private readonly IPEndPoint _targetEndpoint;
     private readonly Func<byte[], ushort, byte[], ushort, uint, uint, byte, byte[], Task> _sendPacket;
 
-    private TcpClient? _tcpClient;
-    private NetworkStream? _stream;
+    // private TcpClient? _tcpClient;
+    // private NetworkStream? _stream;
     private CancellationTokenSource? _cts;
 
     private uint _clientSeq;
@@ -94,14 +94,14 @@ public class TcpForwardSession : IDisposable
     public TcpForwardSession(
         byte[] clientIp, ushort clientPort,
         byte[] serverIp, ushort serverPort,
-        IPEndPoint targetEndpoint,
+        // IPEndPoint targetEndpoint,
         Func<byte[], ushort, byte[], ushort, uint, uint, byte, byte[], Task> sendPacket)
     { 
         _clientIp = (byte[])clientIp.Clone();
         _clientPort = clientPort;
         _serverIp = (byte[])serverIp.Clone();
         _serverPort = serverPort;
-        _targetEndpoint = targetEndpoint;
+        // _targetEndpoint = targetEndpoint;
         _sendPacket = sendPacket;
     }
 
@@ -112,22 +112,23 @@ public class TcpForwardSession : IDisposable
 
         try
         {
-            _tcpClient = new TcpClient();
-            await _tcpClient.ConnectAsync(_targetEndpoint);
-            _stream = _tcpClient.GetStream();
+            // _tcpClient = new TcpClient();
+            // await _tcpClient.ConnectAsync(_targetEndpoint);
+            // _stream = _tcpClient.GetStream();
 
             _clientAck = _clientSeq + 1;
             await SendToClientAsync(TcpPacket.FlagSyn | TcpPacket.FlagAck, Array.Empty<byte>());
             _serverSeq++;
 
             _cts = new CancellationTokenSource();
-            _ = StartReceivingAsync();
+            // _ = StartReceivingAsync();
             
-            Logger.Instance?.LogInfo($"TCP forward session established to {_targetEndpoint} for {_clientIp}:{_clientPort}");
+            Logger.Instance?.LogInfo($"TCP forward session established to {ByteHelper.IpToString(_serverIp)} " +
+                                     $"for {ByteHelper.IpToString(_clientIp)}:{_clientPort}");
         }
         catch (Exception e)
         {
-            Logger.Instance?.LogError($"Failed to connect to {_targetEndpoint}", e);
+            Logger.Instance?.LogError($"Failed to connect to {ByteHelper.IpToString(_clientIp)}", e);
             // 发送 RST
             await SendToClientAsync(TcpPacket.FlagRst, Array.Empty<byte>());
             _isClosed = true;
@@ -136,7 +137,8 @@ public class TcpForwardSession : IDisposable
 
     public async Task ProcessPacketAsync(TcpPacket tcp)
     {
-        if (_isClosed || _stream == null)
+        // if (_isClosed || _stream == null)
+        if (_isClosed)
             return;
 
         if (tcp.HasAck)
@@ -164,8 +166,8 @@ public class TcpForwardSession : IDisposable
         {
             try
             {
-                await _stream.WriteAsync(tcp.Payload);
-                await _stream.FlushAsync();
+                // await _stream.WriteAsync(tcp.Payload);
+                // await _stream.FlushAsync();
                 
                 _clientAck = tcp.SequenceNumber + (uint)tcp.Payload.Length;
                 await SendToClientAsync(TcpPacket.FlagAck, Array.Empty<byte>());
@@ -179,44 +181,44 @@ public class TcpForwardSession : IDisposable
         }
     }
     
-    private async Task StartReceivingAsync()
-    {
-        if (_stream == null || _cts == null) return;
-
-        var buffer = new byte[4096];
-
-        try
-        {
-            while (!_cts.Token.IsCancellationRequested && !_isClosed)
-            {
-                var read = await _stream.ReadAsync(buffer, _cts.Token);
-                if (read == 0)
-                {
-                    // 连接关闭
-                    Logger.Instance?.LogInfo("TCP connection closed by target");
-                    await SendToClientAsync(TcpPacket.FlagAck | TcpPacket.FlagFin, Array.Empty<byte>());
-                    _isClosed = true;
-                    break;
-                }
-
-                // 发送数据给客户端
-                var data = buffer.AsSpan(0, read).ToArray();
-                await SendToClientAsync(TcpPacket.FlagAck | TcpPacket.FlagPsh, data);
-                _serverSeq += (uint)read;
-
-                Logger.Instance?.LogDebug($"TCP received {read} bytes from target, forwarded to client");
-            }
-        }
-        catch (OperationCanceledException)
-        {
-            // 正常取消
-        }
-        catch (Exception e)
-        {
-            Logger.Instance?.LogError("Error receiving from TCP stream", e);
-            _isClosed = true;
-        }
-    }
+    // private async Task StartReceivingAsync()
+    // {
+    //     if (_stream == null || _cts == null) return;
+    //
+    //     var buffer = new byte[4096];
+    //
+    //     try
+    //     {
+    //         while (!_cts.Token.IsCancellationRequested && !_isClosed)
+    //         {
+    //             var read = await _stream.ReadAsync(buffer, _cts.Token);
+    //             if (read == 0)
+    //             {
+    //                 // 连接关闭
+    //                 Logger.Instance?.LogInfo("TCP connection closed by target");
+    //                 await SendToClientAsync(TcpPacket.FlagAck | TcpPacket.FlagFin, Array.Empty<byte>());
+    //                 _isClosed = true;
+    //                 break;
+    //             }
+    //
+    //             // 发送数据给客户端
+    //             var data = buffer.AsSpan(0, read).ToArray();
+    //             await SendToClientAsync(TcpPacket.FlagAck | TcpPacket.FlagPsh, data);
+    //             _serverSeq += (uint)read;
+    //
+    //             Logger.Instance?.LogDebug($"TCP received {read} bytes from target, forwarded to client");
+    //         }
+    //     }
+    //     catch (OperationCanceledException)
+    //     {
+    //         // 正常取消
+    //     }
+    //     catch (Exception e)
+    //     {
+    //         Logger.Instance?.LogError("Error receiving from TCP stream", e);
+    //         _isClosed = true;
+    //     }
+    // }
 
     private async Task SendToClientAsync(byte flags, byte[] data)
     {
@@ -229,7 +231,7 @@ public class TcpForwardSession : IDisposable
         if (_disposed) return;
         _disposed = true;
         _cts?.Cancel();
-        _stream?.Dispose();
-        _tcpClient?.Dispose();
+        // _stream?.Dispose();
+        // _tcpClient?.Dispose();
     }
 }
