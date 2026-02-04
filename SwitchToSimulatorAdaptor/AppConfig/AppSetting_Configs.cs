@@ -38,9 +38,10 @@ public partial class AppSetting
     // --------------- SharpPcap ---------------
     public const string TargetDeviceFriendlyName = "以太网";
     public const int ReadTimeOut = 1000;
-    public const string BPFFilter = "udp port 11452";
+    public const string BPFFilter = "net {0}/16 and not ether src {1}";
+    //public const string BPFFilter = "udp port 11452";
 
-    
+
     // --------------- ForwardEngine ---------------
     public const int ArpCacheSize = 100;
     public const int ArpTtlSeconds = 30;
