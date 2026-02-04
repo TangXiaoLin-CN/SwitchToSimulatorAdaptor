@@ -6,6 +6,7 @@ using SwitchToSimulatorAdaptor.Utils;
 using System.Net;
 using System.Runtime.InteropServices;
 using Ryujinx.Type;
+using ZstdSharp;
 
 namespace SwitchToSimulatorAdaptor;
 
@@ -15,6 +16,9 @@ public class AdaptorEntry
     byte[]? _switchMac;
     private NetworkInfo _networkInfo;
     private EdenRoomMember _edenRoomClient;
+    
+    private readonly Compressor _compressor;
+    private readonly Decompressor _decompressor;
 
     // LDN 协议常量
     private const uint LdnMagic = 0x11451400;
@@ -31,6 +35,12 @@ public class AdaptorEntry
     private readonly object _lock = new object();
     
     private const string LogFlag = "[AdaptorEntry]";
+    
+    public AdaptorEntry()
+    {
+        _compressor = new Compressor();
+        _decompressor = new Decompressor();
+    }
 
     public void Start()
     {
@@ -142,6 +152,18 @@ public class AdaptorEntry
 
     private void HandleSwitchData(byte[] srcIp, ushort srcPort, byte[] dstIp, ushort dstPort, byte[] data)
     {
+        if (dstPort == AppSetting.LdnPacketPort || srcPort == AppSetting.LdnPacketPort)
+        {
+            HandleSwitchLdnPacket(srcIp, srcPort, dstIp, dstPort, data);
+        }
+        else if (dstPort == AppSetting.GameUdpPort || srcPort == AppSetting.GameUdpPort)
+        {
+            HandleSwitchGamePacket(srcIp, srcPort, dstIp, dstPort, data);
+        }
+    }
+
+    private void HandleSwitchLdnPacket(byte[] srcIp, ushort srcPort, byte[] dstIp, ushort dstPort, byte[] data)
+    {
         try
         {
             // 创建 IPv4Address 对象
@@ -206,38 +228,85 @@ public class AdaptorEntry
             }
 
             // 根据数据包类型处理
-            var lanPacketType = (LanPacketType)packetType;
-            switch (lanPacketType)
+            var switchLdnType = (LanPacketType)packetType;
+            
+            var edenLdnPacket = new EdenLDNPacket
             {
-                case LanPacketType.Scan:
-                    HandleSwitchLanPlayScan(switchIp, destIp, payload);
-                    break;
-
-                case LanPacketType.ScanResponse:
-                    // HandleSwitchLanPlayScanResponse(switchIp, destIp, payload);
-                    break;
-
-                case LanPacketType.Connect:
-                    HandleSwitchLanPlayConnect(switchIp, destIp, payload);
-                    break;
-
-                case LanPacketType.SyncNetwork:
-                    // HandleSwitchLanPlaySyncNetwork(switchIp, destIp, payload);
-                    break;
-
-                case LanPacketType.Disconnect:
-                    // HandleSwitchLanPlayDisconnect(switchIp, destIp, payload);
-                    break;
-
-                default:
-                    Logger.Instance?.LogWarning($"{LogFlag} 未处理的 LDN 数据包类型: {lanPacketType}");
-                    break;
-            }
+                Type = SwitchTypeToEdenType(switchLdnType),
+                LocalIp = switchIp,
+                RemoteIp = new (AppSetting.BroadcastBytes),
+                Broadcast = true,
+                Data = payload
+            };
+            
+            _edenRoomClient.SendLdnPacket(edenLdnPacket);
+            
+            // switch (lanPacketType)
+            // {
+            //     case LanPacketType.Scan:
+            //         HandleSwitchLanPlayScan(switchIp, destIp, payload);
+            //         break;
+            //
+            //     case LanPacketType.ScanResponse:
+            //         // HandleSwitchLanPlayScanResponse(switchIp, destIp, payload);
+            //         break;
+            //
+            //     case LanPacketType.Connect:
+            //         HandleSwitchLanPlayConnect(switchIp, destIp, payload);
+            //         break;
+            //
+            //     case LanPacketType.SyncNetwork:
+            //         // HandleSwitchLanPlaySyncNetwork(switchIp, destIp, payload);
+            //         break;
+            //
+            //     case LanPacketType.Disconnect:
+            //         // HandleSwitchLanPlayDisconnect(switchIp, destIp, payload);
+            //         break;
+            //
+            //     default:
+            //         Logger.Instance?.LogWarning($"{LogFlag} 未处理的 LDN 数据包类型: {lanPacketType}");
+            //         break;
+            // }
         }
         catch (Exception ex)
         {
             Logger.Instance?.LogError($"{LogFlag} 处理 SwitchLanPlay LDN 数据包时出错: {ex.Message}");
             Logger.Instance?.LogError($"{LogFlag} 堆栈跟踪: {ex.StackTrace}");
+        }
+    }
+    
+    private void HandleSwitchGamePacket(byte[] srcIp, ushort srcPort, byte[] dstIp, ushort dstPort, byte[] data)
+    {
+        try
+        {
+            var switchIp = new IPv4Address(srcIp[0], srcIp[1], srcIp[2], srcIp[3]);
+            var destIp = new IPv4Address(dstIp[0], dstIp[1], dstIp[2], dstIp[3]);
+            
+            // 创建 ProxyPacket
+            var proxyPacket = new EdenProxyPacket()
+            {
+                LocalEndpoint = new EdenSockAddrIn
+                {
+                    Family = AddressFamily.INET,
+                    Ip = switchIp,
+                    Port = srcPort
+                },
+                RemoteEndpoint = new EdenSockAddrIn
+                {
+                    Family = AddressFamily.INET,
+                    Ip = destIp,
+                    Port = AppSetting.GameUdpPort
+                },
+                EdenProtocol = EdenProtocolType.UDP,
+                Broadcast = ByteHelper.IsBroadcast(dstIp, AppSetting.SubnetNetBytes, AppSetting.SubnetMaskBytes),
+                Data = CompressGameData(data)
+            };
+            
+            _edenRoomClient.SendProxyPacket(proxyPacket);
+        }
+        catch (Exception ex)
+        {
+            Logger.Instance?.LogError($"{LogFlag} 处理 Switch 游戏数据包时出错: {ex.Message}");
         }
     }
 
@@ -270,11 +339,7 @@ public class AdaptorEntry
             Logger.Instance?.LogWarning($"{LogFlag} Connect payload 太短: {payload.Length}");
             return;
         }
-
-        // 解析 NodeInfo
-        NodeInfo nodeInfo = MemoryMarshal.Cast<byte, NodeInfo>(payload.AsSpan())[0];
-        Logger.Instance?.LogInfo($"{LogFlag} Connect NodeInfo: NodeId={nodeInfo.NodeId}, Ipv4Address={nodeInfo.Ipv4Address}, IsConnected={nodeInfo.IsConnected}");
-
+        
         // 创建 LDN 数据包
         var connectPacket = new EdenLDNPacket
         {
@@ -288,18 +353,17 @@ public class AdaptorEntry
         _edenRoomClient.SendLdnPacket(connectPacket);
     }
 
-    void ReceiveEdenProxyPacket(EdenProxyPacket obj)
+    void ReceiveEdenProxyPacket(EdenProxyPacket packet)
     {
-        Logger.Instance?.LogInfo($"edenProxyPacket");
-    }
-
-
-    void ReceiveEdenLdnPacket(EdenLDNPacket packet)
-    {
-        SendLdnPacketToSwitchViaSwitchLanPlay(packet);
+        HandleProxyPacketFromEden(packet);
     }
     
-    public void SendLdnPacketToSwitchViaSwitchLanPlay(EdenLDNPacket packet)
+    void ReceiveEdenLdnPacket(EdenLDNPacket packet)
+    {
+        HandleLdnPacketFromEden(packet);
+    }
+    
+    public void HandleLdnPacketFromEden(EdenLDNPacket packet)
     {
         try
         {
@@ -361,7 +425,39 @@ public class AdaptorEntry
         }
     }
     
-    
+    /// <summary>
+    /// 处理从 Eden 收到的 ProxyPacket（转发到 Switch）
+    /// </summary>
+    public void HandleProxyPacketFromEden(EdenProxyPacket proxyPacket)
+    {
+        if (proxyPacket.EdenProtocol != EdenProtocolType.UDP)
+        {
+            Logger.Instance?.LogWarning($"{LogFlag} 不支持的 EdenProxyPacket 协议类型: {proxyPacket.EdenProtocol}");
+            return;
+        }
+
+        try
+        {
+            // 解压数据
+            var data = DecompressGameData(proxyPacket.Data);
+            if (data == null || data.Length == 0)
+            {
+                Logger.Instance?.LogWarning($"{LogFlag} EdenProxyPacket 数据为空或解压失败");
+                return;
+            }
+            
+            SendUdpToSwitch(
+                proxyPacket.LocalEndpoint.Ip.ToBytes(),
+                proxyPacket.LocalEndpoint.Port,
+                proxyPacket.Broadcast ? AppSetting.BroadcastBytes : proxyPacket.LocalEndpoint.Ip.ToBytes(),
+                AppSetting.GameUdpPort,
+                data);
+        }
+        catch (Exception ex)
+        {
+            Logger.Instance?.LogError($"{LogFlag} 处理 ProxyPacket 时出错: {ex.Message}");
+        }
+    }
 
     /// <summary>
     /// 解压缩 LDN 数据（零字节游程编码）
@@ -449,6 +545,32 @@ public class AdaptorEntry
         }
 
         return i == input.Length ? outputList.ToArray() : null;
+    }
+    
+    private byte[] CompressGameData(byte[] data)
+    {
+        try
+        {
+            return _compressor.Wrap(data).ToArray();
+        }
+        catch (Exception ex)
+        {
+            Logger.Instance?.LogError($"{LogFlag} 压缩数据失败: {ex.Message}");
+            return data;
+        }
+    }
+
+    private byte[]? DecompressGameData(byte[] compressedData)
+    {
+        try
+        {
+            return _decompressor.Unwrap(compressedData).ToArray();
+        }
+        catch (Exception ex)
+        {
+            Logger.Instance?.LogError($"{LogFlag} 解压数据失败: {ex.Message}");
+            return null;
+        }
     }
 
     LanPacketType EdenTypeToSwitchType(EdenLDNPacketType edenLdnType)
