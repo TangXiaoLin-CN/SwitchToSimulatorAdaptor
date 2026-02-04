@@ -8,7 +8,7 @@ public class PacketForwardEngine : IAsyncDisposable
 {
     private readonly string _networkInterface;
     private readonly Action<byte[], ushort, byte[], ushort, byte[]> _onUdpReceived;
-    private readonly Action<byte[], ushort, byte[], ushort, byte[], TcpPacketFlags>? _onTcpReceived;
+    private readonly Action<byte[], ushort, byte[], ushort, byte[]>? _onTcpReceived;
 
     private IPacketCapture? _capture;
     private ArpCache? _arpCache;
@@ -24,14 +24,13 @@ public class PacketForwardEngine : IAsyncDisposable
 
     private readonly ConcurrentDictionary<TcpSessionKey, TcpForwardSession> _tcpSessions = new();
     private readonly Timer? _gcTimer;
-    private IPEndPoint? _tcpForwardTarget;
 
     public bool IsRunning => _isRunning;
 
     public PacketForwardEngine(
         string networkInterface,
         Action<byte[], ushort, byte[], ushort, byte[]> onUdpReceived,
-        Action<byte[], ushort, byte[], ushort, byte[], TcpPacketFlags>? onTcpReceived)
+        Action<byte[], ushort, byte[], ushort, byte[]>? onTcpReceived)
     {
         _networkInterface = networkInterface;
         _onUdpReceived = onUdpReceived;
@@ -131,12 +130,6 @@ public class PacketForwardEngine : IAsyncDisposable
         uint seqNum, uint ackNum, byte flags, ReadOnlyMemory<byte> payload)
     {
         await SendTcpPacketAsync(srcIp, srcPort, dstIp, dstPort, seqNum, ackNum, flags, payload.ToArray());
-    }
-
-    public void SetTcpForwardTarget(IPEndPoint target)
-    {
-        _tcpForwardTarget = target;
-        Logger.Instance?.LogInfo($"TCP forwarding target set to {target}");
     }
 
     public List<byte[]> GetAllKnownSwitchIps()
@@ -293,14 +286,8 @@ public class PacketForwardEngine : IAsyncDisposable
         Logger.Instance?.LogInfo($"TCP: {ByteHelper.IpToString(srcIp)}:{tcp.SourcePort} " +
                                  $"-> {ByteHelper.IpToString(dstIp)}:{tcp.DestinationPort}, " +
                                  $"Flags:[{tcp.FlagsString}], Payload: {tcp.Payload.Length} bytes");
-
-        _onTcpReceived?.Invoke(srcIp, tcp.SourcePort, dstIp, tcp.DestinationPort, tcp.Payload.ToArray(), flags);
-
-        // if (_tcpForwardTarget != null)
-        if (true)
-        {
-            await HandleTcpForwardAsync(ip, tcp, srcIp, dstIp);
-        }
+        
+        await HandleTcpForwardAsync(ip, tcp, srcIp, dstIp);
     }
     
     private async Task ProcessIcmpAsync(IPv4Packet ip, byte[] mac)
@@ -324,48 +311,54 @@ public class PacketForwardEngine : IAsyncDisposable
     
     private async Task HandleTcpForwardAsync(IPv4Packet ip, TcpPacket tcp, byte[] srcIp, byte[] dstIp)
     {
-        // if (_tcpForwardTarget == null) return;
-
         var key = new TcpSessionKey(srcIp, tcp.SourcePort, dstIp, tcp.DestinationPort);
+        
+        // 检查是否已存在会话
+        if (_tcpSessions.TryGetValue(key, out var existingSession))
+        {
+            // 如果存在会话，直接处理数据包
+            await existingSession.ProcessPacketAsync(tcp);
+
+            if (existingSession.State == TcpSessionState.Established)
+            {
+                _onTcpReceived?.Invoke(srcIp, tcp.SourcePort, dstIp, tcp.DestinationPort, tcp.Payload.ToArray());
+            }
+        
+            if (existingSession.IsClosed)
+            {
+                _tcpSessions.TryRemove(key, out _);
+                Logger.Instance?.LogInfo($"TCP session closed and removed: {key}");
+            }
+            return;
+        }
         
         // SYN - 新连接
         if (tcp.HasSyn && !tcp.HasAck)
         {
             Logger.Instance?.LogInfo($"TCP SYN: Creating new forward session for {key}");
 
+            var tcpOptions = tcp.Options.ToArray();
+        
             var session = new TcpForwardSession(
                 srcIp, tcp.SourcePort,
                 dstIp, tcp.DestinationPort,
-                // _tcpForwardTarget,
                 SendTcpPacketAsync);
 
             _tcpSessions[key] = session;
-            await session.HandleSynAsync(tcp.SequenceNumber);
+            await session.HandleSynAsync(tcp.SequenceNumber, tcpOptions);
             return;
         }
 
-        if (!_tcpSessions.TryGetValue(key, out var existingSession))
-        {
-            Logger.Instance?.LogWarning($"TCP session not found for {key}, flags: {tcp.FlagsString}");
-            return;
-        }
-
-        await existingSession.ProcessPacketAsync(tcp);
-
-        if (existingSession.IsClosed)
-        {
-            _tcpSessions.TryRemove(key, out _);
-            Logger.Instance?.LogInfo($"TCP session closed and removed: {key}");
-        }
+        Logger.Instance?.LogWarning($"TCP session not found for {key}, flags: {tcp.FlagsString}");
     }
     
     private async Task SendTcpPacketAsync(byte[] srcIp, ushort srcPort, byte[] dstIp, ushort dstPort, 
-        uint seqNum, uint ackNum, byte flags, byte[] payload)
+        uint seqNum, uint ackNum, byte flags, byte[] payload, byte[]? options = null)
     {
         if (_capture == null || _arpCache == null)
             return;
 
-        var tcpPacket = TcpPacket.Build(srcIp, srcPort, dstIp, dstPort, seqNum, ackNum, flags, 65535, payload);
+        var tcpPacket = TcpPacket.Build(srcIp, srcPort, dstIp, dstPort, seqNum, ackNum, flags, 65535, payload, options ?? Array.Empty<byte>());
         var ipPacket = IPv4Packet.Build(srcIp, dstIp, IPv4Packet.ProtocolTcp, tcpPacket, ref _identification);
 
         await SendToMacAsync(dstIp, ipPacket);

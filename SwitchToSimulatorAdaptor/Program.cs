@@ -1,7 +1,6 @@
 ﻿
 
 using SwitchToSimulatorAdaptor;
-using SwitchToSimulatorAdaptor.SharpPcap;
 
 // SharpPcapManager.PrintDevicesList(); // 查看所有接口
 

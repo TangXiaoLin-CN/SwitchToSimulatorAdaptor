@@ -4,6 +4,16 @@ using SwitchToSimulatorAdaptor.Utils;
 
 namespace SwitchToSimulatorAdaptor.ForwardEngine;
 
+public enum TcpSessionState
+{
+    Listen,         // 等待连接
+    SynReceived,    // 收到 SYN
+    Established,    // 连接建立
+    CloseWait,      // 等待关闭
+    LastAck,        // 等待最后的 ACK
+    Closed          // 连接关闭
+}
+
 public struct TcpPacketFlags
 {
     public bool Syn { get; set; }
@@ -75,53 +85,51 @@ public class TcpForwardSession : IDisposable
     private readonly ushort _clientPort;
     private readonly byte[] _serverIp;
     private readonly ushort _serverPort;
-    // private readonly IPEndPoint _targetEndpoint;
-    private readonly Func<byte[], ushort, byte[], ushort, uint, uint, byte, byte[], Task> _sendPacket;
-
-    // private TcpClient? _tcpClient;
-    // private NetworkStream? _stream;
+    private readonly Func<byte[], ushort, byte[], ushort, uint, uint, byte, byte[], byte[]?, Task> _sendPacket;
+    
     private CancellationTokenSource? _cts;
 
     private uint _clientSeq;
     private uint _serverSeq;
     private uint _clientAck;
 
-    private bool _disposed;
-    private bool _isClosed;
+    private byte[] _tcpOptions;
 
-    public bool IsClosed => _isClosed;
+    private bool _disposed;
+    // private bool _isClosed;
+    private TcpSessionState _state;
+    
+    public TcpSessionState State => _state;
+    public bool IsClosed => _state == TcpSessionState.Closed;
     
     public TcpForwardSession(
         byte[] clientIp, ushort clientPort,
         byte[] serverIp, ushort serverPort,
-        // IPEndPoint targetEndpoint,
-        Func<byte[], ushort, byte[], ushort, uint, uint, byte, byte[], Task> sendPacket)
+        Func<byte[], ushort, byte[], ushort, uint, uint, byte, byte[], byte[]?, Task> sendPacket)
     { 
         _clientIp = (byte[])clientIp.Clone();
         _clientPort = clientPort;
         _serverIp = (byte[])serverIp.Clone();
         _serverPort = serverPort;
-        // _targetEndpoint = targetEndpoint;
         _sendPacket = sendPacket;
+         _state = TcpSessionState.Listen;
     }
 
-    public async Task HandleSynAsync(uint clientSeq)
+    public async Task HandleSynAsync(uint clientSeq, byte[] tcpOptions)
     {
         _clientSeq = clientSeq;
         _serverSeq = (uint)Random.Shared.Next();
-
+        _tcpOptions = tcpOptions;
+        
         try
         {
-            // _tcpClient = new TcpClient();
-            // await _tcpClient.ConnectAsync(_targetEndpoint);
-            // _stream = _tcpClient.GetStream();
-
             _clientAck = _clientSeq + 1;
-            await SendToClientAsync(TcpPacket.FlagSyn | TcpPacket.FlagAck, Array.Empty<byte>());
+            await SendToClientAsync(TcpPacket.FlagSyn | TcpPacket.FlagAck, Array.Empty<byte>(), _tcpOptions);
             _serverSeq++;
+            
+            _state = TcpSessionState.SynReceived;
 
             _cts = new CancellationTokenSource();
-            // _ = StartReceivingAsync();
             
             Logger.Instance?.LogInfo($"TCP forward session established to {ByteHelper.IpToString(_serverIp)} " +
                                      $"for {ByteHelper.IpToString(_clientIp)}:{_clientPort}");
@@ -131,44 +139,50 @@ public class TcpForwardSession : IDisposable
             Logger.Instance?.LogError($"Failed to connect to {ByteHelper.IpToString(_clientIp)}", e);
             // 发送 RST
             await SendToClientAsync(TcpPacket.FlagRst, Array.Empty<byte>());
-            _isClosed = true;
+            _state = TcpSessionState.Closed;
         }
     }
 
     public async Task ProcessPacketAsync(TcpPacket tcp)
     {
-        // if (_isClosed || _stream == null)
-        if (_isClosed)
+        if (_state == TcpSessionState.Closed)
             return;
 
         if (tcp.HasAck)
         {
-            // 更新客户端确认号 （用于流控制）
+            if (_state == TcpSessionState.SynReceived)
+            {
+                _state = TcpSessionState.Established;
+                Logger.Instance?.LogInfo($"TCP connection established: {ByteHelper.IpToString(_clientIp)}:{_clientPort}");
+            }
+            else if (_state == TcpSessionState.LastAck)
+            {
+                _state = TcpSessionState.Closed;
+                Logger.Instance?.LogInfo($"TCP connection closed: {ByteHelper.IpToString(_clientIp)}:{_clientPort}");
+            }
         }
 
         if (tcp.HasFin)
         {
             Logger.Instance?.LogInfo("TCP FIN received from client");
             _clientAck = tcp.SequenceNumber + 1;
+            _state = TcpSessionState.CloseWait;
             await SendToClientAsync(TcpPacket.FlagAck | TcpPacket.FlagFin, Array.Empty<byte>());
-            _isClosed = true;
+            _state = TcpSessionState.LastAck;
             return;
         }
 
         if (tcp.HasRst)
         {
             Logger.Instance?.LogInfo("TCP RST received from client");
-            _isClosed = true;
+            _state = TcpSessionState.Closed;
             return;
         }
 
-        if (tcp.Payload.Length > 0)
+        if (tcp.Payload.Length > 0 && _state == TcpSessionState.Established)
         {
             try
             {
-                // await _stream.WriteAsync(tcp.Payload);
-                // await _stream.FlushAsync();
-                
                 _clientAck = tcp.SequenceNumber + (uint)tcp.Payload.Length;
                 await SendToClientAsync(TcpPacket.FlagAck, Array.Empty<byte>());
                 Logger.Instance?.LogDebug($"TCP forwarded {tcp.Payload.Length} bytes to target");
@@ -176,54 +190,19 @@ public class TcpForwardSession : IDisposable
             catch (Exception e)
             {
                 Logger.Instance?.LogError("Error writing to TCP stream", e);
-                _isClosed = true;
+                _state = TcpSessionState.Closed;
             }
         }
     }
-    
-    // private async Task StartReceivingAsync()
-    // {
-    //     if (_stream == null || _cts == null) return;
-    //
-    //     var buffer = new byte[4096];
-    //
-    //     try
-    //     {
-    //         while (!_cts.Token.IsCancellationRequested && !_isClosed)
-    //         {
-    //             var read = await _stream.ReadAsync(buffer, _cts.Token);
-    //             if (read == 0)
-    //             {
-    //                 // 连接关闭
-    //                 Logger.Instance?.LogInfo("TCP connection closed by target");
-    //                 await SendToClientAsync(TcpPacket.FlagAck | TcpPacket.FlagFin, Array.Empty<byte>());
-    //                 _isClosed = true;
-    //                 break;
-    //             }
-    //
-    //             // 发送数据给客户端
-    //             var data = buffer.AsSpan(0, read).ToArray();
-    //             await SendToClientAsync(TcpPacket.FlagAck | TcpPacket.FlagPsh, data);
-    //             _serverSeq += (uint)read;
-    //
-    //             Logger.Instance?.LogDebug($"TCP received {read} bytes from target, forwarded to client");
-    //         }
-    //     }
-    //     catch (OperationCanceledException)
-    //     {
-    //         // 正常取消
-    //     }
-    //     catch (Exception e)
-    //     {
-    //         Logger.Instance?.LogError("Error receiving from TCP stream", e);
-    //         _isClosed = true;
-    //     }
-    // }
 
-    private async Task SendToClientAsync(byte flags, byte[] data)
+    private async Task SendToClientAsync(byte flags, byte[] data, byte[]? options = null)
     {
+        if (_serverPort == 11452 || _clientPort == 11452)
+        {
+            Logger.Instance?.LogDebug("111");
+        }
         await _sendPacket(_serverIp, _serverPort, _clientIp, _clientPort, 
-            _serverSeq, _clientAck, flags, data);
+            _serverSeq, _clientAck, flags, data, options ?? Array.Empty<byte>());
     }
 
     public void Dispose()
@@ -231,7 +210,5 @@ public class TcpForwardSession : IDisposable
         if (_disposed) return;
         _disposed = true;
         _cts?.Cancel();
-        // _stream?.Dispose();
-        // _tcpClient?.Dispose();
     }
 }
