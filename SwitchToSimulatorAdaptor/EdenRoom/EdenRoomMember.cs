@@ -48,6 +48,8 @@ public class EdenRoomMember : IDisposable
     private Thread? _loopThread;
     private bool _sholdStop = false;
     
+    private readonly ReaderWriterLockSlim _rwLock = new ReaderWriterLockSlim(LockRecursionPolicy.SupportsRecursion);
+    
     // 事件
     public event Action<State>? StateChanged;
     public event Action<Error>? ErrorOccurred;
@@ -191,153 +193,183 @@ public class EdenRoomMember : IDisposable
 
     public void SendLdnPacket(EdenLDNPacket ldnPacket)
     {
-        if (!IsConnected()) return;
-        
-        EdenNetworkPacket packet = new();
-        packet.Write((byte)RoomMessageTypes.IdLdnPacket);
-        packet.Write((byte)ldnPacket.Type);
-        // LDN 数据包头部使用大端字节序（A.B.C.D）
-        packet.Write(ldnPacket.LocalIp);
-        packet.Write(ldnPacket.RemoteIp);
-        packet.Write(ldnPacket.Broadcast);
-        packet.Write(ldnPacket.Data);
+        _rwLock.EnterReadLock();
+        try
+        {
+            if (!IsConnected()) return;
+            if (!_serverInitialized || _client == null || _server == IntPtr.Zero) return;
+            
+            EdenNetworkPacket packet = new();
+            packet.Write((byte)RoomMessageTypes.IdLdnPacket);
+            packet.Write((byte)ldnPacket.Type);
+            // LDN 数据包头部使用大端字节序（A.B.C.D）
+            packet.Write(ldnPacket.LocalIp);
+            packet.Write(ldnPacket.RemoteIp);
+            packet.Write(ldnPacket.Broadcast);
+            packet.Write(ldnPacket.Data);
 
-        if (!_serverInitialized || _client == null || _server == IntPtr.Zero) return;
+            byte[] data = packet.GetData();
+            if (data == null || data.Length == 0) return;
+            
+            // 调试日志：检查数据包内容
+            Logger.Instance?.LogInfo($"[EdenRoomMember] SendLdnPacket: 数据包总长度={data.Length} 字节");
+            Logger.Instance?.LogInfo($"[EdenRoomMember] SendLdnPacket: Type={ldnPacket.Type}, LocalIp = {ldnPacket.LocalIp.A}.{ldnPacket.LocalIp.B}.{ldnPacket.LocalIp.C}.{ldnPacket.LocalIp.D}, RemoteIp = {ldnPacket.RemoteIp.A}.{ldnPacket.RemoteIp.B}.{ldnPacket.RemoteIp.C}.{ldnPacket.RemoteIp.D}, Broadcast={ldnPacket.Broadcast}, Data={ldnPacket.Data}");
+            if (data.Length >= 11) // 至少需要 1+1+4+4+1 = 11 个字节
+            {
+                Logger.Instance?.LogInfo($"[EdenRoomMember] SendLdnPacket: 数据包前 11 字节：{BitConverter.ToString(data, 0,Math.Min(11, data.Length))}");
+                Logger.Instance?.LogInfo($"[EdenRoomMember] SendLdnPacket: LocalIp 字节（偏移2-5，大端）：{data[2]}.{data[3]}.{data[4]}.{data[5]}");
+                Logger.Instance?.LogInfo($"[EdenRoomMember] SendLdnPacket: RemoteIp 字节（偏移6-9，大端）：{data[6]}.{data[7]}.{data[8]}.{data[9]}");
+                Logger.Instance?.LogInfo($"[EdenRoomMember] SendLdnPacket: Broadcast 字节（偏移10）：{data[10]}");
+            }
+            else
+            {
+                Logger.Instance?.LogInfo($"[EdenRoomMember] SendLdnPacket: 数据包长度不足 11 字节，仅有：{data.Length} 字节，无法打印数据包内容");
+            }
 
-        byte[] data = packet.GetData();
-        if (data == null || data.Length == 0) return;
-        
-        // 调试日志：检查数据包内容
-        Logger.Instance?.LogInfo($"[EdenRoomMember] SendLdnPacket: 数据包总长度={data.Length} 字节");
-        Logger.Instance?.LogInfo($"[EdenRoomMember] SendLdnPacket: Type={ldnPacket.Type}, LocalIp = {ldnPacket.LocalIp.A}.{ldnPacket.LocalIp.B}.{ldnPacket.LocalIp.C}.{ldnPacket.LocalIp.D}, RemoteIp = {ldnPacket.RemoteIp.A}.{ldnPacket.RemoteIp.B}.{ldnPacket.RemoteIp.C}.{ldnPacket.RemoteIp.D}, Broadcast={ldnPacket.Broadcast}, Data={ldnPacket.Data}");
-        if (data.Length >= 11) // 至少需要 1+1+4+4+1 = 11 个字节
-        {
-            Logger.Instance?.LogInfo($"[EdenRoomMember] SendLdnPacket: 数据包前 11 字节：{BitConverter.ToString(data, 0,Math.Min(11, data.Length))}");
-            Logger.Instance?.LogInfo($"[EdenRoomMember] SendLdnPacket: LocalIp 字节（偏移2-5，大端）：{data[2]}.{data[3]}.{data[4]}.{data[5]}");
-            Logger.Instance?.LogInfo($"[EdenRoomMember] SendLdnPacket: RemoteIp 字节（偏移6-9，大端）：{data[6]}.{data[7]}.{data[8]}.{data[9]}");
-            Logger.Instance?.LogInfo($"[EdenRoomMember] SendLdnPacket: Broadcast 字节（偏移10）：{data[10]}");
+            IntPtr enetPacket = _client.CreatePacket(data, NativeENet.ENetPacketFlag.ENET_PACKET_FLAG_RELIABLE);
+            if (enetPacket == IntPtr.Zero)
+            {
+                Logger.Instance?.LogInfo($"Failed to create ENet packet");
+                return;
+            }
+            
+            int result = NativeENet.enet_peer_send(_server, 0, enetPacket);
+            if (result < 0)
+            {
+                Logger.Instance?.LogInfo($"Failed to send packet: {result}");
+                NativeENetHost.DestroyPacket(enetPacket);
+            }
+            else
+            {
+                _client.Flush();
+            }
         }
-        else
+        finally
         {
-            Logger.Instance?.LogInfo($"[EdenRoomMember] SendLdnPacket: 数据包长度不足 11 字节，仅有：{data.Length} 字节，无法打印数据包内容");
-        }
-
-        IntPtr enetPacket = _client.CreatePacket(data, NativeENet.ENetPacketFlag.ENET_PACKET_FLAG_RELIABLE);
-        if (enetPacket == IntPtr.Zero)
-        {
-            Logger.Instance?.LogInfo($"Failed to create ENet packet");
-            return;
-        }
-        
-        int result = NativeENet.enet_peer_send(_server, 0, enetPacket);
-        if (result < 0)
-        {
-            Logger.Instance?.LogInfo($"Failed to send packet: {result}");
-            NativeENetHost.DestroyPacket(enetPacket);
-        }
-        else
-        {
-            _client.Flush();
+            _rwLock.ExitReadLock();
         }
     }
 
     public void SendProxyPacket(EdenProxyPacket proxyPacket)
     {
-        if (!IsConnected()) return;
-        
-        EdenNetworkPacket packet = new();
-        packet.Write((byte)RoomMessageTypes.IdProxyPacket);
-        packet.Write((byte)proxyPacket.LocalEndpoint.Family);
-        packet.Write(proxyPacket.LocalEndpoint.Ip);
-        packet.Write(proxyPacket.LocalEndpoint.Port);
-        packet.Write((byte)proxyPacket.RemoteEndpoint.Family);
-        packet.Write(proxyPacket.RemoteEndpoint.Ip);
-        packet.Write(proxyPacket.RemoteEndpoint.Port);
-        packet.Write((byte)proxyPacket.EdenProtocol);
-        packet.Write(proxyPacket.Broadcast);
-        packet.Write(proxyPacket.Data);
-
-        if (!_serverInitialized || _client == null || _server == IntPtr.Zero) return;
-
-        byte[] data = packet.GetData();
-        if (data == null || data.Length == 0) return;
-
-        Logger.Instance?.LogDebug(
-            $"[EdenRoomMember] SendProxyPacket 到 Eden：Local={proxyPacket.LocalEndpoint.Ip.A}.{proxyPacket.LocalEndpoint.Ip.B}.{proxyPacket.LocalEndpoint.Ip.C}.{proxyPacket.LocalEndpoint.Ip.D}:{proxyPacket.LocalEndpoint}" +
-            $", Remote={proxyPacket.RemoteEndpoint.Ip.A}.{proxyPacket.RemoteEndpoint.Ip.B}.{proxyPacket.RemoteEndpoint.Ip.C}.{proxyPacket.RemoteEndpoint.Ip.D}:{proxyPacket.RemoteEndpoint})" +
-            $", EdenProtocol={proxyPacket.EdenProtocol}, Broadcast={proxyPacket.Broadcast}, DataLength={proxyPacket.Data.Length}");
-
-        IntPtr enetPacket = _client.CreatePacket(data, NativeENet.ENetPacketFlag.ENET_PACKET_FLAG_RELIABLE);
-        if (enetPacket == IntPtr.Zero)
+        _rwLock.EnterReadLock();
+        try
         {
-            Logger.Instance?.LogWarning($"[EdenRoomMember] SendProxyPacket: Failed to create ENet packet");
-            return;
+            if (!IsConnected()) return;
+            if (!_serverInitialized || _client == null || _server == IntPtr.Zero) return;
+            
+            EdenNetworkPacket packet = new();
+            packet.Write((byte)RoomMessageTypes.IdProxyPacket);
+            packet.Write((byte)proxyPacket.LocalEndpoint.Family);
+            packet.Write(proxyPacket.LocalEndpoint.Ip);
+            packet.Write(proxyPacket.LocalEndpoint.Port);
+            packet.Write((byte)proxyPacket.RemoteEndpoint.Family);
+            packet.Write(proxyPacket.RemoteEndpoint.Ip);
+            packet.Write(proxyPacket.RemoteEndpoint.Port);
+            packet.Write((byte)proxyPacket.EdenProtocol);
+            packet.Write(proxyPacket.Broadcast);
+            packet.Write(proxyPacket.Data);
+
+            byte[] data = packet.GetData();
+            if (data == null || data.Length == 0) return;
+
+            Logger.Instance?.LogDebug(
+                $"[EdenRoomMember] SendProxyPacket 到 Eden：Local={proxyPacket.LocalEndpoint.Ip.A}.{proxyPacket.LocalEndpoint.Ip.B}.{proxyPacket.LocalEndpoint.Ip.C}.{proxyPacket.LocalEndpoint.Ip.D}:{proxyPacket.LocalEndpoint}" +
+                $", Remote={proxyPacket.RemoteEndpoint.Ip.A}.{proxyPacket.RemoteEndpoint.Ip.B}.{proxyPacket.RemoteEndpoint.Ip.C}.{proxyPacket.RemoteEndpoint.Ip.D}:{proxyPacket.RemoteEndpoint})" +
+                $", EdenProtocol={proxyPacket.EdenProtocol}, Broadcast={proxyPacket.Broadcast}, DataLength={proxyPacket.Data.Length}");
+
+            IntPtr enetPacket = _client.CreatePacket(data, NativeENet.ENetPacketFlag.ENET_PACKET_FLAG_RELIABLE);
+            if (enetPacket == IntPtr.Zero)
+            {
+                Logger.Instance?.LogWarning($"[EdenRoomMember] SendProxyPacket: Failed to create ENet packet");
+                return;
+            }
+
+            int result = NativeENet.enet_peer_send(_server, 0, enetPacket);
+            if (result < 0)
+            {
+                Logger.Instance?.LogWarning($"[EdenRoomMember] SendProxyPacket: Failed to send packet: {result}");
+                NativeENetHost.DestroyPacket(enetPacket);
+            }
+            else
+            {
+                _client.Flush();
+            }
         }
-
-        int result = NativeENet.enet_peer_send(_server, 0, enetPacket); // Q: 这里为什么不用包装层？ 而是直接原生调用？
-        if (result < 0)
+        finally
         {
-            Logger.Instance?.LogWarning($"[EdenRoomMember] SendProxyPacket: Failed to send packet: {result}");
-            NativeENetHost.DestroyPacket(enetPacket);
-        }
-        else
-        {
-            _client.Flush();
+            _rwLock.ExitReadLock();
         }
     }
 
     public void SendGameInfo(GameInfo gameInfo)
     {
         _currentGameInfo = gameInfo;
-        if (!IsConnected()) return;
         
-        EdenNetworkPacket packet = new();
-        packet.Write((byte)RoomMessageTypes.IdSetGameInfo);
-        packet.Write(gameInfo.Name);
-        packet.Write(gameInfo.Id.ToString());
-        packet.Write(gameInfo.Version);
-        
-        if (!_serverInitialized || _client == null || _server == IntPtr.Zero) return;
+        _rwLock.EnterReadLock();
+        try
+        {
+            if (!IsConnected()) return;
+            if (!_serverInitialized || _client == null || _server == IntPtr.Zero) return;
+            
+            EdenNetworkPacket packet = new();
+            packet.Write((byte)RoomMessageTypes.IdSetGameInfo);
+            packet.Write(gameInfo.Name);
+            packet.Write(gameInfo.Id.ToString());
+            packet.Write(gameInfo.Version);
 
-        byte[] data = packet.GetData();
-        if (data == null || data.Length == 0) return;
-        
-        IntPtr enetPacket = _client.CreatePacket(data, NativeENet.ENetPacketFlag.ENET_PACKET_FLAG_RELIABLE);
-        if (enetPacket == IntPtr.Zero)
-        {
-            Logger.Instance?.LogWarning($"[EdenRoomMember] SendGameInfo: Failed to create ENet packet");
-            return;
+            byte[] data = packet.GetData();
+            if (data == null || data.Length == 0) return;
+            
+            IntPtr enetPacket = _client.CreatePacket(data, NativeENet.ENetPacketFlag.ENET_PACKET_FLAG_RELIABLE);
+            if (enetPacket == IntPtr.Zero)
+            {
+                Logger.Instance?.LogWarning($"[EdenRoomMember] SendGameInfo: Failed to create ENet packet");
+                return;
+            }
+            
+            int result = NativeENet.enet_peer_send(_server, 0, enetPacket);
+            if (result < 0)
+            {
+                Logger.Instance?.LogWarning($"[EdenRoomMember] SendGameInfo: Failed to send packet: {result}");
+                NativeENetHost.DestroyPacket(enetPacket);
+            }
+            else
+            {
+                _client.Flush();
+            }
         }
-        
-        int result = NativeENet.enet_peer_send(_server, 0, enetPacket);
-        if (result < 0)
+        finally
         {
-            Logger.Instance?.LogWarning($"[EdenRoomMember] SendGameInfo: Failed to send packet: {result}");
-            NativeENetHost.DestroyPacket(enetPacket);
+            _rwLock.ExitReadLock();
         }
-        else
-        {
-            _client.Flush();
-        }
-        
     }
 
     public void Leave()
     {
         _sholdStop = true;
-        if (_serverInitialized && _client != null && _server != IntPtr.Zero)
+        
+        _rwLock.EnterWriteLock();
+        try
         {
-            try
+            if (_serverInitialized && _client != null && _server != IntPtr.Zero)
             {
-                NativeENet.enet_peer_disconnect_now(_server, 0);
-                _client.Flush();
+                try
+                {
+                    NativeENet.enet_peer_disconnect_now(_server, 0);
+                    _client.Flush();
+                }
+                catch (Exception e)
+                {
+                    // 忽略断开连接时的错误
+                }
             }
-            catch (Exception e)
-            {
-                // 忽略断开连接时的错误
-            }
+            _serverInitialized = false;
         }
-        _serverInitialized = false;
+        finally
+        {
+            _rwLock.ExitWriteLock();
+        }
 
         if (_loopThread != null && _loopThread.IsAlive)
         {
@@ -346,7 +378,6 @@ public class EdenRoomMember : IDisposable
         
         _memberInformation.Clear();
         _roomInformation = default;
-        _serverInitialized = false;
         SetState(State.Idle);
     }
 
@@ -397,35 +428,37 @@ public class EdenRoomMember : IDisposable
 
     private void HandlePacket(NativeENetEvent netEvent)
     {
-        byte[] data = netEvent.GetPacketData();
-        if (data == null || data.Length == 0) return;
-        
-        RoomMessageTypes messageType = (RoomMessageTypes)data[0];
-        var packet = new EdenNetworkPacket();
-        packet.Append(data);
-
-        switch (messageType)
+        try
         {
-            case RoomMessageTypes.IdLdnPacket:
-                HandleLdnPacket(packet);
-                break;
-            case RoomMessageTypes.IdProxyPacket:
-                HandleProxyPacket(packet);
-                break;
-            case RoomMessageTypes.IdRoomInformation: 
-                HandleRoomInformation(packet);
-                break;
-            case RoomMessageTypes.IdJoinSuccess:
-            case RoomMessageTypes.IdJoinSuccessAsMod:
-                HandleJoinSuccess(packet, messageType == RoomMessageTypes.IdJoinSuccessAsMod);
-                break;
-            case RoomMessageTypes.IdRoomIsFull:
-                SetState(State.Idle);
-                ErrorOccurred?.Invoke(Error.RoomIsFull);
-                break;
-            case RoomMessageTypes.IdNameCollision:
-                SetState(State.Idle);
-                ErrorOccurred?.Invoke(Error.NameCollision);
+            byte[] data = netEvent.GetPacketData();
+            if (data == null || data.Length == 0) return;
+            
+            RoomMessageTypes messageType = (RoomMessageTypes)data[0];
+            var packet = new EdenNetworkPacket();
+            packet.Append(data);
+
+            switch (messageType)
+            {
+                case RoomMessageTypes.IdLdnPacket:
+                    HandleLdnPacket(packet);
+                    break;
+                case RoomMessageTypes.IdProxyPacket:
+                    HandleProxyPacket(packet);
+                    break;
+                case RoomMessageTypes.IdRoomInformation: 
+                    HandleRoomInformation(packet);
+                    break;
+                case RoomMessageTypes.IdJoinSuccess:
+                case RoomMessageTypes.IdJoinSuccessAsMod:
+                    HandleJoinSuccess(packet, messageType == RoomMessageTypes.IdJoinSuccessAsMod);
+                    break;
+                case RoomMessageTypes.IdRoomIsFull:
+                    SetState(State.Idle);
+                    ErrorOccurred?.Invoke(Error.RoomIsFull);
+                    break;
+                case RoomMessageTypes.IdNameCollision:
+                    SetState(State.Idle);
+                    ErrorOccurred?.Invoke(Error.NameCollision);
                 break;
             case RoomMessageTypes.IdIpCollision:
                 SetState(State.Idle);
@@ -447,6 +480,12 @@ public class EdenRoomMember : IDisposable
                 SetState(State.Idle);
                 ErrorOccurred?.Invoke(Error.HostBanned);
                 break;
+            }
+        }
+        finally
+        {
+            // 重要：必须销毁 ENet 数据包，否则会导致内存泄漏
+            netEvent.DestroyPacket();
         }
     }
 
@@ -705,38 +744,44 @@ public class EdenRoomMember : IDisposable
 
     private void SendJoinRequest(string nickname, IPv4Address preferredFakeIP, string password, string token)
     {
-        if (!IsConnected()) return;
-
-        EdenNetworkPacket packet = new EdenNetworkPacket();
-        packet.Write((byte)RoomMessageTypes.IdJoinRequest);
-        packet.Write(nickname); // 顺序： nickname 在前
-        packet.Write(preferredFakeIP);
-        packet.Write((uint)1);  // network_version
-        packet.Write(password);
-        packet.Write(token);
-
-        if (!_serverInitialized || _client == null) return;
-        if (!_serverInitialized || _client == null || _server == IntPtr.Zero) return;
-        
-        byte[] data = packet.GetData();
-        if (data == null || data.Length == 0) return;
-
-        IntPtr enetPacket = _client.CreatePacket(data, NativeENet.ENetPacketFlag.ENET_PACKET_FLAG_RELIABLE);
-        if (enetPacket == IntPtr.Zero)
+        _rwLock.EnterReadLock();
+        try
         {
-            Logger.Instance?.LogInfo("Failed to create ENet packet");
-            return;
+            if (!IsConnected()) return;
+            if (!_serverInitialized || _client == null || _server == IntPtr.Zero) return;
+
+            EdenNetworkPacket packet = new EdenNetworkPacket();
+            packet.Write((byte)RoomMessageTypes.IdJoinRequest);
+            packet.Write(nickname); // 顺序： nickname 在前
+            packet.Write(preferredFakeIP);
+            packet.Write((uint)1);  // network_version
+            packet.Write(password);
+            packet.Write(token);
+            
+            byte[] data = packet.GetData();
+            if (data == null || data.Length == 0) return;
+
+            IntPtr enetPacket = _client.CreatePacket(data, NativeENet.ENetPacketFlag.ENET_PACKET_FLAG_RELIABLE);
+            if (enetPacket == IntPtr.Zero)
+            {
+                Logger.Instance?.LogInfo("Failed to create ENet packet");
+                return;
+            }
+
+            int result = NativeENet.enet_peer_send(_server, 0, enetPacket);
+            if (result < 0)
+            {
+                Logger.Instance?.LogInfo($"Failed to send packet: {result}");
+                NativeENetHost.DestroyPacket(enetPacket);
+            }
+            else
+            {
+                _client.Flush();
+            }
         }
-
-        int result = NativeENet.enet_peer_send(_server, 0, enetPacket);
-        if (result < 0)
+        finally
         {
-            Logger.Instance?.LogInfo($"Failed to send packet: {result}");
-            NativeENetHost.DestroyPacket(enetPacket);
-        }
-        else
-        {
-            _client.Flush();
+            _rwLock.ExitReadLock();
         }
     }
     
@@ -754,8 +799,19 @@ public class EdenRoomMember : IDisposable
         if (!_disposed)
         {
             Leave();
-            _client?.Dispose();
-            _disposed = true;
+            
+            _rwLock.EnterWriteLock();
+            try
+            {
+                _client?.Dispose();
+                _disposed = true;
+            }
+            finally
+            {
+                _rwLock.ExitWriteLock();
+            }
+            
+            _rwLock.Dispose();
         }
     }
 }

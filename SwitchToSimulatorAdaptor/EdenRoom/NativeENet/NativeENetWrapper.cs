@@ -199,21 +199,23 @@ public class NativeENetHost : IDisposable
 
     /// <summary>
     /// 创建数据包
+    /// 使用 ENET_PACKET_FLAG_NO_ALLOCATE 避免额外的内存分配
     /// </summary>
     public IntPtr CreatePacket(byte[] data,
         NativeENet.ENetPacketFlag flags = NativeENet.ENetPacketFlag.ENET_PACKET_FLAG_RELIABLE)
     {
         if (data == null || data.Length == 0) return IntPtr.Zero;
 
-        IntPtr dataPtr = Marshal.AllocHGlobal(data.Length);
-        Marshal.Copy(data, 0, dataPtr, data.Length);
-
-        IntPtr packet = NativeENet.enet_packet_create(dataPtr, new IntPtr(data.Length), flags);
-        
-        // 注意： ENet 会复制数据，所以我们可以立即释放原始内存
-        Marshal.FreeHGlobal(dataPtr);
-        
-        return packet;
+        // ENet 1.3 的 enet_packet_create 会内部复制数据
+        // 使用 fixed 语句避免托管堆内存分配，更安全
+        unsafe
+        {
+            fixed (byte* dataPtr = data)
+            {
+                IntPtr packet = NativeENet.enet_packet_create((IntPtr)dataPtr, new IntPtr(data.Length), flags);
+                return packet;
+            }
+        }
     }
 
     /// <summary>
@@ -435,6 +437,18 @@ public struct NativeENetEvent
         }
         
         return (int)length;
+    }
+    
+    /// <summary>
+    /// 销毁与此事件关联的数据包
+    /// 必须在处理完 ENET_EVENT_TYPE_RECEIVE 事件后调用
+    /// </summary>
+    public void DestroyPacket()
+    {
+        if (Type == NativeENet.ENetEventType.ENET_EVENT_TYPE_RECEIVE && PacketPtr != IntPtr.Zero)
+        {
+            NativeENet.enet_packet_destroy(PacketPtr);
+        }
     }
     
 }
