@@ -178,7 +178,7 @@ public class NativeENetHost : IDisposable
     {
         if (_host != IntPtr.Zero)
         {
-            NativeENet.enet_host_flush(_host);
+            NativeENet.enet_host_flush(_host); //TODO: 这里会抛异常
         }
     }
 
