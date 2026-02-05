@@ -35,7 +35,10 @@ public class AdaptorEntry
     private readonly object _lock = new object();
     
     private const string LogFlag = "[AdaptorEntry]";
-    
+
+    private bool EnableDetailedPacketLogging { get; set; } = false;
+
+
     public AdaptorEntry()
     {
         _compressor = new Compressor();
@@ -281,7 +284,16 @@ public class AdaptorEntry
         {
             var switchIp = new IPv4Address(srcIp[0], srcIp[1], srcIp[2], srcIp[3]);
             var destIp = new IPv4Address(dstIp[0], dstIp[1], dstIp[2], dstIp[3]);
-            
+
+            if (EnableDetailedPacketLogging)
+            {
+                Logger.Instance?.LogInfo($"{LogFlag} ========== 收到 Switch UDP 数据包 ==========");
+                Logger.Instance?.LogInfo($"{LogFlag} 来源: {switchIp}:{srcPort}");
+                Logger.Instance?.LogInfo($"{LogFlag} 目标: {destIp}:{dstPort}");
+                Logger.Instance?.LogInfo($"{LogFlag} 原始大小: {data.Length} 字节");
+                Logger.Instance?.LogInfo($"{LogFlag} 内容 (hex): {FormatPacketData(data)}");
+            }
+
             // 创建 ProxyPacket
             var proxyPacket = new EdenProxyPacket()
             {
@@ -301,7 +313,15 @@ public class AdaptorEntry
                 Broadcast = ByteHelper.IsBroadcast(dstIp, AppSetting.SubnetNetBytes, AppSetting.SubnetMaskBytes),
                 Data = CompressGameData(data)
             };
-            
+
+            if (EnableDetailedPacketLogging)
+            {
+                string transmitMode = proxyPacket.Broadcast ? "单播" : "广播";
+                Logger.Instance?.LogInfo($"{LogFlag} 转发到 Eden: {destIp} ({transmitMode})");
+                Logger.Instance?.LogInfo($"{LogFlag} 压缩后大小: {proxyPacket.Data.Length} 字节");
+                Logger.Instance?.LogInfo($"{LogFlag} ================================================");
+            }
+
             _edenRoomClient.SendProxyPacket(proxyPacket);
         }
         catch (Exception ex)
@@ -449,8 +469,8 @@ public class AdaptorEntry
             SendUdpToSwitch(
                 proxyPacket.LocalEndpoint.Ip.ToBytes(),
                 proxyPacket.LocalEndpoint.Port,
-                proxyPacket.Broadcast ? AppSetting.BroadcastBytes : proxyPacket.LocalEndpoint.Ip.ToBytes(),
-                AppSetting.GameUdpPort,
+                proxyPacket.Broadcast ? AppSetting.BroadcastBytes : proxyPacket.RemoteEndpoint.Ip.ToBytes(),
+                proxyPacket.RemoteEndpoint.Port,
                 data);
         }
         catch (Exception ex)
@@ -571,6 +591,20 @@ public class AdaptorEntry
             Logger.Instance?.LogError($"{LogFlag} 解压数据失败: {ex.Message}");
             return null;
         }
+    }
+
+    private string FormatPacketData(byte[] data, int maxBytes = 64)
+    {
+        if (data == null || data.Length == 0)
+            return "(empty)";
+
+        int bytesToShow = Math.Min(data.Length, maxBytes);
+        var hex = BitConverter.ToString(data, 0, bytesToShow).Replace("-", " ");
+
+        if (data.Length > maxBytes)
+            hex += $" ... (+{data.Length - maxBytes} more bytes)";
+
+        return hex;
     }
 
     LanPacketType EdenTypeToSwitchType(EdenLDNPacketType edenLdnType)
