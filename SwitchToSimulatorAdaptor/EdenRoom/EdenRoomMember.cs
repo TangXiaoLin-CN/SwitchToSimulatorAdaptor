@@ -798,12 +798,18 @@ public class EdenRoomMember : IDisposable
     {
         if (!_disposed)
         {
+            // Leave() 已经处理了断开连接和获取写锁的逻辑
+            // 只需要调用 Leave() 来确保清理
             Leave();
             
+            // 在 Leave() 之后，_loopThread 应该已经停止
+            // 现在可以安全地释放 _client
             _rwLock.EnterWriteLock();
             try
             {
                 _client?.Dispose();
+                _client = null;
+                _server = IntPtr.Zero;
                 _disposed = true;
             }
             finally

@@ -150,8 +150,17 @@ public class EdenNetworkPacket
 
         uint length = ReadUInt32();
         
-        // 检查长度是否合理（字符串长度不应该超过剩余数据，也不应该太大）
-        if (length > int.MaxValue || length > remaining)
+        // 安全检查：限制最大字符串长度（1MB）
+        const uint MaxStringLength = 1024 * 1024; // 1MB
+        if (length > MaxStringLength)
+        {
+            Logger.Instance?.LogError($"[EdenPacket] ReadString: 字符串长度异常 ({length} bytes)，超过最大限制 {MaxStringLength} bytes");
+            Logger.Instance?.LogError($"[EdenPacket] ReadString: Length bytes(hex): {lengthHex} (ASCII: {lengthAsAscii})");
+            throw new InvalidDataException($"String length too large: {length}");
+        }
+        
+        // 检查长度是否合理（字符串长度不应该超过剩余数据）
+        if (length > remaining)
         {
             Logger.Instance?.LogError($"[EdenPacket] ReadString: Invalid length value! length={length} (0x{length:X}), readPos = {startPos}, remaining = {remaining}");
             Logger.Instance?.LogError($"[EdenPacket] ReadString: Length bytes(hex): {lengthHex} (ASCII: {lengthAsAscii})");
@@ -185,6 +194,22 @@ public class EdenNetworkPacket
     public byte[] ReadBytes()
     {
         uint length = ReadUInt32();
+        
+        // 安全检查：限制最大读取长度（10MB）
+        const uint MaxLength = 10 * 1024 * 1024; // 10MB
+        if (length > MaxLength)
+        {
+            Logger.Instance?.LogError($"[EdenPacket] ReadBytes: 数据包长度异常 ({length} bytes)，超过最大限制 {MaxLength} bytes");
+            throw new InvalidDataException($"Packet length too large: {length}");
+        }
+        
+        // 检查是否有足够的数据
+        if (_readPos + length > _data.Count)
+        {
+            Logger.Instance?.LogError($"[EdenPacket] ReadBytes: 数据不足！需要 {length} bytes，但只有 {_data.Count - _readPos} bytes");
+            throw new EndOfStreamException($"Not enough data: need {length}, have {_data.Count - _readPos}");
+        }
+        
         byte[] bytes = new byte[length];
         for (int i = 0; i < length; i++)
             bytes[i] = ReadByte();

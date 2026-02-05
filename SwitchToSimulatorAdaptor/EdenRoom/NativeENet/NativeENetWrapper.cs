@@ -240,17 +240,31 @@ public class NativeENetHost : IDisposable
                 {
                     if (peer != IntPtr.Zero)
                     {
-                        NativeENet.enet_peer_disconnect_now(peer, 0);
+                        try
+                        {
+                            NativeENet.enet_peer_disconnect_now(peer, 0);
+                        }
+                        catch
+                        {
+                            // 忽略断开连接时的错误
+                        }
                     }
                 }
                 _peers.Clear();
                 
                 // 销毁主机
-                NativeENet.enet_host_destroy(_host);
+                try
+                {
+                    NativeENet.enet_host_destroy(_host);
+                }
+                catch
+                {
+                    // 忽略销毁时的错误
+                }
                 _host = IntPtr.Zero;
             }
-            // 清理原生 ENet
-            NativeENet.enet_deinitialize();
+            // 注意：不要在这里调用 enet_deinitialize()，因为它是全局的
+            // 应该在程序退出时调用一次
             _disposed = true;
         }
     }

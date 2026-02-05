@@ -1,8 +1,10 @@
-﻿
+
 
 using SharpPcap;
 using SharpPcap.LibPcap;
 using SwitchToSimulatorAdaptor;
+using SwitchToSimulatorAdaptor.EdenRoom;
+using SwitchToSimulatorAdaptor.Utils;
 
 void PrintDevicesList()
 {
@@ -42,3 +44,12 @@ var entry = new AdaptorEntry();
 entry.Start();
 
 Console.ReadLine();
+
+// 程序退出时正确释放资源
+entry.Stop();
+
+// 清理 ENet 全局资源
+NativeENet.enet_deinitialize();
+
+// 确保日志写入完成
+Logger.Instance?.Dispose();

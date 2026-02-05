@@ -632,4 +632,25 @@ public class AdaptorEntry
             _ => EdenLDNPacketType.Scan
         };
     }
+
+    public void Stop()
+    {
+        Logger.Instance?.LogInfo($"{LogFlag} 正在停止适配器...");
+        
+        // 停止转发引擎
+        _cancellationTokenSource?.Cancel();
+        _forwardEngine?.StopAsync().Wait(TimeSpan.FromSeconds(5));
+        
+        // 释放转发引擎
+        _forwardEngine?.DisposeAsync().AsTask().Wait(TimeSpan.FromSeconds(5));
+        
+        // 释放 Eden 房间客户端
+        _edenRoomClient?.Dispose();
+        
+        // 释放压缩器
+        _compressor.Dispose();
+        _decompressor.Dispose();
+        
+        Logger.Instance?.LogInfo($"{LogFlag} 适配器已停止");
+    }
 }
