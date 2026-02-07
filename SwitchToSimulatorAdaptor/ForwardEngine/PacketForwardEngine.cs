@@ -8,7 +8,7 @@ public class PacketForwardEngine : IAsyncDisposable
 {
     private readonly string _networkInterface;
     private readonly Action<byte[], ushort, byte[], ushort, byte[]> _onUdpReceived;
-    private readonly Action<byte[], ushort, byte[], ushort, byte[]>? _onTcpReceived;
+    private readonly Action<TcpForwardSession, byte[], ushort, byte[], ushort, byte[]>? _onTcpReceived;
 
     private IPacketCapture? _capture;
     private ArpCache? _arpCache;
@@ -30,7 +30,7 @@ public class PacketForwardEngine : IAsyncDisposable
     public PacketForwardEngine(
         string networkInterface,
         Action<byte[], ushort, byte[], ushort, byte[]> onUdpReceived,
-        Action<byte[], ushort, byte[], ushort, byte[]>? onTcpReceived)
+        Action<TcpForwardSession, byte[], ushort, byte[], ushort, byte[]>? onTcpReceived)
     {
         _networkInterface = networkInterface;
         _onUdpReceived = onUdpReceived;
@@ -126,10 +126,13 @@ public class PacketForwardEngine : IAsyncDisposable
         }
     }
     
-    public async Task SendTcpAsync(byte[] srcIp, ushort srcPort, byte[] dstIp, ushort dstPort,
-        uint seqNum, uint ackNum, byte flags, ReadOnlyMemory<byte> payload)
+    public async Task SendTcpAsync(byte[] srcIp, ushort srcPort, byte[] dstIp, ushort dstPort, ReadOnlyMemory<byte> payload)
     {
-        await SendTcpPacketAsync(srcIp, srcPort, dstIp, dstPort, seqNum, ackNum, flags, payload.ToArray());
+        var tcpSession = FindTcpSessionByEndpoints(srcIp, srcPort, dstIp, dstPort);
+        if (tcpSession == null)
+            return;
+
+        await tcpSession.SendTcpAsync(payload);
     }
 
     public List<byte[]> GetAllKnownSwitchIps()
@@ -317,12 +320,7 @@ public class PacketForwardEngine : IAsyncDisposable
         if (_tcpSessions.TryGetValue(key, out var existingSession))
         {
             // 如果存在会话，直接处理数据包
-            await existingSession.ProcessPacketAsync(tcp);
-
-            if (existingSession.State == TcpSessionState.Established)
-            {
-                _onTcpReceived?.Invoke(srcIp, tcp.SourcePort, dstIp, tcp.DestinationPort, tcp.Payload.ToArray());
-            }
+            await existingSession.ProcessPacketAsync(ip, tcp, srcIp, dstIp);
         
             if (existingSession.IsClosed)
             {
@@ -340,6 +338,7 @@ public class PacketForwardEngine : IAsyncDisposable
             var tcpOptions = tcp.Options.ToArray();
         
             var session = new TcpForwardSession(
+                this,
                 srcIp, tcp.SourcePort,
                 dstIp, tcp.DestinationPort,
                 SendTcpPacketAsync);
@@ -351,7 +350,13 @@ public class PacketForwardEngine : IAsyncDisposable
 
         Logger.Instance?.LogWarning($"TCP session not found for {key}, flags: {tcp.FlagsString}");
     }
-    
+
+    public async Task ForwardTcpPacket(TcpForwardSession tcpSession ,TcpPacket tcp, byte[] srcIp, byte[] dstIp)
+    {
+        _onTcpReceived?.Invoke(tcpSession ,srcIp, tcp.SourcePort, dstIp, tcp.DestinationPort, tcp.Payload.ToArray());
+    }
+
+
     private async Task SendTcpPacketAsync(byte[] srcIp, ushort srcPort, byte[] dstIp, ushort dstPort, 
         uint seqNum, uint ackNum, byte flags, byte[] payload, byte[]? options = null)
     {
@@ -402,7 +407,20 @@ public class PacketForwardEngine : IAsyncDisposable
         EthernetFrame.Build(buffer, dstMac, _capture.MacAddress, etherType, payload.Span);
         await _capture.SendPacketAsync(buffer);
     }
-    
+
+    private TcpForwardSession? FindTcpSessionByEndpoints(byte[] srcIp, ushort srcPort, byte[] dstIp, ushort dstPort)
+    {
+        // 尝试正向查找
+        var key1 = new TcpSessionKey(srcIp, srcPort, dstIp, dstPort);
+        if (_tcpSessions.TryGetValue(key1, out var session))
+            return session;
+
+        // 尝试反向查找（数据从服务器返回时）
+        var key2 = new TcpSessionKey(dstIp, dstPort, srcIp, srcPort);
+        _tcpSessions.TryGetValue(key2, out session);
+        return session;
+    }
+
     private void GarbageCollectTcpSessions(object? state)
     {
         var closedSessions = _tcpSessions

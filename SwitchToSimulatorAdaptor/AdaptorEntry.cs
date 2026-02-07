@@ -142,8 +142,26 @@ public class AdaptorEntry
             }
         });
     }
-    
-    private void OnTcpPacketFromSwitch(byte[] srcIp, ushort srcPort, byte[] dstIp, ushort dstPort, byte[] data)
+
+    private void SendTcpToSwitch(byte[] srcIp, ushort srcPort, byte[] dstIp, ushort dstPort, byte[] data)
+    {
+        if (_forwardEngine == null)
+            return;
+
+        Task.Run(async () =>
+        {
+            try
+            {
+                await _forwardEngine.SendTcpAsync(srcIp, srcPort, dstIp, dstPort, data);
+            }
+            catch (Exception e)
+            {
+                Logger.Instance?.LogError($"{LogFlag} 发送 TCP 失败", e);
+            }
+        });
+    }
+
+    private void OnTcpPacketFromSwitch(TcpForwardSession tcpSession ,byte[] srcIp, ushort srcPort, byte[] dstIp, ushort dstPort, byte[] data)
     {
         HandleSwitchData(srcIp, srcPort, dstIp, dstPort, data);
     }
@@ -424,7 +442,7 @@ public class AdaptorEntry
             }
 
             // 获取目标 IP
-            byte[] srcIp = AppSetting.GatewayIpBytes; // 网关 IP
+            byte[] srcIp = packet.LocalIp.ToBytes(); // 网关 IP
             byte[] dstIp;
             if (packet.Broadcast)
             {
@@ -436,7 +454,15 @@ public class AdaptorEntry
             }
 
             // 发送
-            SendUdpToSwitch(srcIp, 11452, dstIp, 11452, fullPacket);
+            if (packet.Type == EdenLDNPacketType.SyncNetwork)
+            {
+                SendTcpToSwitch(srcIp, AppSetting.LdnPacketPort, dstIp, AppSetting.LdnPacketPort, fullPacket);
+            }
+            else
+            {
+                SendUdpToSwitch(srcIp, AppSetting.LdnPacketPort, dstIp, AppSetting.LdnPacketPort, fullPacket);
+            }
+
             Logger.Instance?.LogInfo($"{LogFlag} 已通过 SwitchLanPlay 发送 LDN 数据包: Type={packet.Type}, 目标={dstIp[0]}.{dstIp[1]}.{dstIp[2]}.{dstIp[3]}, Compressed={compressed}");
         }
         catch (Exception ex)

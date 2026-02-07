@@ -1,6 +1,6 @@
+using SwitchToSimulatorAdaptor.Utils;
 using System.Net;
 using System.Net.Sockets;
-using SwitchToSimulatorAdaptor.Utils;
 
 namespace SwitchToSimulatorAdaptor.ForwardEngine;
 
@@ -81,6 +81,7 @@ public readonly struct TcpSessionKey : IEquatable<TcpSessionKey>
 
 public class TcpForwardSession : IDisposable
 {
+    private readonly PacketForwardEngine _forwardEngine;
     private readonly byte[] _clientIp;
     private readonly ushort _clientPort;
     private readonly byte[] _serverIp;
@@ -102,11 +103,12 @@ public class TcpForwardSession : IDisposable
     public TcpSessionState State => _state;
     public bool IsClosed => _state == TcpSessionState.Closed;
     
-    public TcpForwardSession(
+    public TcpForwardSession(PacketForwardEngine packetForwardEngine,
         byte[] clientIp, ushort clientPort,
         byte[] serverIp, ushort serverPort,
         Func<byte[], ushort, byte[], ushort, uint, uint, byte, byte[], byte[]?, Task> sendPacket)
-    { 
+    {
+        _forwardEngine = packetForwardEngine;
         _clientIp = (byte[])clientIp.Clone();
         _clientPort = clientPort;
         _serverIp = (byte[])serverIp.Clone();
@@ -143,7 +145,7 @@ public class TcpForwardSession : IDisposable
         }
     }
 
-    public async Task ProcessPacketAsync(TcpPacket tcp)
+    public async Task ProcessPacketAsync(IPv4Packet ip, TcpPacket tcp, byte[] srcIp, byte[] dstIp)
     {
         if (_state == TcpSessionState.Closed)
             return;
@@ -159,6 +161,18 @@ public class TcpForwardSession : IDisposable
             {
                 _state = TcpSessionState.Closed;
                 Logger.Instance?.LogInfo($"TCP connection closed: {ByteHelper.IpToString(_clientIp)}:{_clientPort}");
+            }
+            else if (_state == TcpSessionState.Established)
+            {
+                // 如果已建立连接，则转发TCP消息
+                try
+                {
+                    await _forwardEngine.ForwardTcpPacket(this, tcp, srcIp, dstIp);
+                }
+                catch (Exception e)
+                {
+                    Logger.Instance?.LogError($"[TcpForwardSession] 发送 TCP 失败", e);
+                }
             }
         }
 
@@ -195,12 +209,17 @@ public class TcpForwardSession : IDisposable
         }
     }
 
+    public async Task SendTcpAsync(ReadOnlyMemory<byte> payload)
+    {
+        if (_state != TcpSessionState.Established)
+            return;
+
+        await SendToClientAsync(TcpPacket.FlagAck | TcpPacket.FlagPsh, payload.ToArray());
+        _serverSeq += (uint)payload.Length;
+    }
+
     private async Task SendToClientAsync(byte flags, byte[] data, byte[]? options = null)
     {
-        if (_serverPort == 11452 || _clientPort == 11452)
-        {
-            Logger.Instance?.LogDebug("111");
-        }
         await _sendPacket(_serverIp, _serverPort, _clientIp, _clientPort, 
             _serverSeq, _clientAck, flags, data, options ?? Array.Empty<byte>());
     }
