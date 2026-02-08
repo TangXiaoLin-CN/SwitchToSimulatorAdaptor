@@ -39,14 +39,14 @@ public struct TcpPacketFlags
 public readonly struct TcpSessionKey : IEquatable<TcpSessionKey>
 {
     public byte[] SrcIp { get; }
-    public ushort SrcPort { get; }
+    //public ushort SrcPort { get; }
     public byte[] DstIp { get; }
     public ushort DstPort { get; }
 
     public TcpSessionKey(byte[] srcIp, ushort srcPort, byte[] dstIp, ushort dstPort)
     {
         SrcIp = (byte[])srcIp.Clone();
-        SrcPort = srcPort;
+        //SrcPort = srcPort;
         DstIp = (byte[])dstIp.Clone();
         DstPort = dstPort;
     }
@@ -55,7 +55,7 @@ public readonly struct TcpSessionKey : IEquatable<TcpSessionKey>
     {
         return HashCode.Combine(
             ByteHelper.IpToUint(SrcIp),
-            SrcPort,
+            DstPort,
             ByteHelper.IpToUint(DstIp),
             DstPort);
     }
@@ -63,7 +63,7 @@ public readonly struct TcpSessionKey : IEquatable<TcpSessionKey>
     public bool Equals(TcpSessionKey other)
     {
         return ByteHelper.CompareIp(SrcIp, other.SrcIp) &&
-               SrcPort == other.SrcPort && 
+               DstPort == other.DstPort && 
                ByteHelper.CompareIp(DstIp, other.DstIp) &&
                DstPort == other.DstPort;
     }
@@ -75,7 +75,7 @@ public readonly struct TcpSessionKey : IEquatable<TcpSessionKey>
     
     public override string ToString()
     {
-        return $"{ByteHelper.IpToString(SrcIp)}:{SrcPort} -> {ByteHelper.IpToString(DstIp)}:{DstPort}";
+        return $"{ByteHelper.IpToString(SrcIp)}:{DstPort} -> {ByteHelper.IpToString(DstIp)}:{DstPort}";
     }
 }
 
